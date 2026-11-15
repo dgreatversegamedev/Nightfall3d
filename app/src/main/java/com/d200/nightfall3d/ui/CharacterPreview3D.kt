@@ -16,8 +16,8 @@ import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.input.pointer.pointerInput
 import com.d200.nightfall3d.ui.theme.NfColors
 import com.google.android.filament.IndirectLight
-import com.google.android.filament.Skybox
 import io.github.sceneview.Scene
+import io.github.sceneview.SurfaceType
 import io.github.sceneview.environment.Environment
 import io.github.sceneview.math.Position
 import io.github.sceneview.math.Rotation
@@ -33,6 +33,9 @@ import io.github.sceneview.rememberNodes
 // Shows a real character GLB standing in idle, for the Character screen and the Main Menu.
 // Drag left / right on it to turn him around.
 //
+// The character is loaded and placed the SAME way as in the arena (feet on the floor at 0).
+// There is no background colour any more: the menu behind it shows through.
+//
 // NOTE: CharacterSilhouette below has the SAME name as the one in Theme.kt. Files in this package
 // (MainMenuScreen.kt) now pick this one, so the main menu shows the real 3D character you picked,
 // without editing MainMenuScreen.kt. The old drawn silhouette is still in Theme.kt, just not used here.
@@ -42,12 +45,7 @@ private const val PREVIEW_HEIGHT = 1.8f      // character size in meters (same a
 private const val PREVIEW_CAM_DIST = 2.8f    // smaller = he looks bigger
 private const val PREVIEW_CAM_Y = 0.95f      // camera height
 private const val PREVIEW_LOOK_Y = 0.9f      // height of the point the camera looks at
-private val PREVIEW_BG = Color(0xFF1A0F4A)   // same purple as the middle of the menu background
-
-// The camera above is back to the original. Only the character is moved:
-// this lifts him up in the box. Bigger = he moves UP, smaller = he moves DOWN.
-// 0f = original position.
-private const val MODEL_LIFT = 1.8f
+private const val PREVIEW_START_YAW = -90f   // he starts facing you. If you see his back, change to 90f. For side view use 0f.
 
 /** The character the player picked. The Character screen sets it, the main menu shows it. */
 object SelectedCharacter {
@@ -56,7 +54,7 @@ object SelectedCharacter {
 
 private class PreviewState {
     var model: ModelNode? = null
-    var yaw = 0f
+    var yaw = PREVIEW_START_YAW
     var t = 0f
     var last = 0L
     var idle = -1
@@ -70,14 +68,12 @@ fun CharacterPreview3D(glb: String, modifier: Modifier = Modifier) {
     val cameraNode = rememberCameraNode(engine)
     val state = remember { PreviewState() }
 
+    // Light only. No skybox, so there is no background colour.
     val environment = remember(engine) {
         Environment(
             indirectLight = IndirectLight.Builder()
                 .irradiance(1, floatArrayOf(1f, 1f, 1f))
                 .intensity(30_000f)
-                .build(engine),
-            skybox = Skybox.Builder()
-                .color(PREVIEW_BG.red, PREVIEW_BG.green, PREVIEW_BG.blue, 1f)
                 .build(engine)
         )
     }
@@ -102,6 +98,8 @@ fun CharacterPreview3D(glb: String, modifier: Modifier = Modifier) {
     Box(modifier) {
         Scene(
             modifier = Modifier.fillMaxSize(),
+            surfaceType = SurfaceType.TextureSurface,   // lets the menu show through
+            isOpaque = false,                           // transparent background
             engine = engine,
             modelLoader = modelLoader,
             materialLoader = materialLoader,
@@ -115,7 +113,8 @@ fun CharacterPreview3D(glb: String, modifier: Modifier = Modifier) {
                 cameraNode.lookAt(Position(0f, PREVIEW_LOOK_Y, 0f))
                 val m = state.model
                 if (m != null) {
-                    m.position = Position(0f, MODEL_LIFT, 0f)
+                    // same as the arena: position = where his feet stand
+                    m.position = Position(0f, 0f, 0f)
                     m.rotation = Rotation(y = state.yaw)
                     val a = m.modelInstance.animator
                     if (a.animationCount > 0) {
