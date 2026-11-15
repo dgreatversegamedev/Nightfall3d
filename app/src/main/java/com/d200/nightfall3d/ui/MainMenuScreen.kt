@@ -1,109 +1,191 @@
 package com.d200.nightfall3d.ui
 
 import androidx.compose.foundation.background
-import androidx.compose.foundation.layout.Arrangement
-import androidx.compose.foundation.layout.Box
-import androidx.compose.foundation.layout.Column
-import androidx.compose.foundation.layout.Row
-import androidx.compose.foundation.layout.fillMaxSize
-import androidx.compose.foundation.layout.padding
-import androidx.compose.foundation.layout.width
+import androidx.compose.foundation.border
+import androidx.compose.foundation.clickable
+import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
-import androidx.compose.foundation.text.BasicText
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.runtime.Composable
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
-import androidx.compose.ui.text.TextStyle
-import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
-import androidx.compose.ui.unit.sp
 import com.d200.nightfall3d.game.GameApi
-import com.d200.nightfall3d.ui.theme.NfButton
-import com.d200.nightfall3d.ui.theme.NfColors
+import com.d200.nightfall3d.ui.theme.*
 
-private val menuItems = listOf(
-    "Store" to "store",
-    "Luck Royale" to "luck",
-    "Character" to "character",
-    "Weapons" to "weapons",
-    "Vault" to "vault",
-    "Pet" to "pet",
-    "Missions" to "missions",
-    "Events" to "events"
+private class MenuEntry(val label: String, val route: String, val color: Color)
+
+private val entries = listOf(
+    MenuEntry("Store", "store", NfColors.Gold),
+    MenuEntry("Luck Royale", "luck", NfColors.Accent),
+    MenuEntry("Character", "character", NfColors.Cyan),
+    MenuEntry("Weapons", "weapons", NfColors.Purple),
+    MenuEntry("Vault", "vault", NfColors.Cyan),
+    MenuEntry("Pet", "pet", NfColors.Purple),
+    MenuEntry("Missions", "missions", NfColors.Green),
+    MenuEntry("Events", "events", NfColors.Accent)
 )
 
 @Composable
 fun MainMenuScreen(api: GameApi, onOpen: (String) -> Unit) {
     val p = api.profile()
-    Box(Modifier.fillMaxSize().background(NfColors.Bg)) {
-
+    Box(
+        Modifier
+            .fillMaxSize()
+            .background(NfBrush.Screen)
+            .windowInsetsPadding(WindowInsets.displayCutout)
+            .padding(12.dp)
+    ) {
         // Centre: the 3D character will be drawn here later
-        Box(Modifier.align(Alignment.Center)) {
-            BasicText(
-                "3D character here",
-                style = TextStyle(color = NfColors.TextDim, fontSize = 16.sp)
-            )
-        }
-
-        // Top left: player name and level
-        BasicText(
-            "${p.name}  Lv.${p.level}",
-            modifier = Modifier.align(Alignment.TopStart).padding(16.dp),
-            style = TextStyle(
-                color = NfColors.Text,
-                fontSize = 16.sp,
-                fontWeight = FontWeight.Bold
-            )
+        CharacterSilhouette(
+            Modifier.align(Alignment.Center).fillMaxHeight(0.92f).width(300.dp)
+        )
+        NfText(
+            "3D MODEL HERE",
+            modifier = Modifier.align(Alignment.BottomCenter).padding(bottom = 6.dp),
+            size = 11,
+            color = NfColors.TextDim
         )
 
-        // Left: menu list (scrolls on small screens)
+        // Left: profile + menu list
         Column(
             Modifier
-                .align(Alignment.CenterStart)
-                .padding(start = 12.dp, top = 56.dp, bottom = 12.dp)
-                .verticalScroll(rememberScrollState()),
+                .align(Alignment.TopStart)
+                .width(190.dp)
+                .fillMaxHeight()
+                .padding(bottom = 48.dp),
             verticalArrangement = Arrangement.spacedBy(6.dp)
         ) {
-            menuItems.forEach { (label, route) ->
-                NfButton(label, Modifier.width(150.dp)) { onOpen(route) }
+            ProfileCard(p.name, p.level)
+            Column(
+                Modifier.weight(1f).verticalScroll(rememberScrollState()),
+                verticalArrangement = Arrangement.spacedBy(5.dp)
+            ) {
+                entries.forEach { e -> MenuRow(e) { onOpen(e.route) } }
             }
         }
 
-        // Top right: coins, diamonds, settings
-        Row(
-            Modifier.align(Alignment.TopEnd).padding(12.dp),
-            horizontalArrangement = Arrangement.spacedBy(8.dp),
-            verticalAlignment = Alignment.CenterVertically
+        // Top right: currency, settings, battle pass, free gifts
+        Column(
+            Modifier.align(Alignment.TopEnd).width(300.dp),
+            verticalArrangement = Arrangement.spacedBy(8.dp),
+            horizontalAlignment = Alignment.End
         ) {
-            Chip("${p.coins}", NfColors.Gold)
-            Chip("${p.diamonds}", NfColors.Diamond)
-            NfButton("Settings") { onOpen("settings") }
+            Row(
+                horizontalArrangement = Arrangement.spacedBy(8.dp),
+                verticalAlignment = Alignment.CenterVertically
+            ) {
+                CurrencyChip(p.coins, NfColors.Gold)
+                CurrencyChip(p.diamonds, NfColors.Cyan, true)
+                NfButton("Settings", size = 12) { onOpen("settings") }
+            }
+            BattlePassCard()
+            GiftCard()
         }
 
-        // Bottom right: PLAY
-        NfButton(
-            "PLAY",
-            Modifier.align(Alignment.BottomEnd).padding(16.dp).width(200.dp),
-            primary = true
-        ) { onOpen("play") }
+        // Bottom right: ranked info + PLAY
+        Column(
+            Modifier.align(Alignment.BottomEnd).width(280.dp),
+            verticalArrangement = Arrangement.spacedBy(8.dp)
+        ) {
+            NfPanel(Modifier.fillMaxWidth()) {
+                Column(Modifier.padding(horizontal = 12.dp, vertical = 8.dp)) {
+                    NfText("BR-RANKED", color = NfColors.Cyan, bold = true)
+                    NfText("Random Map", size = 11, color = NfColors.TextDim)
+                }
+            }
+            NfButton(
+                "PLAY  >>",
+                Modifier.fillMaxWidth().height(58.dp),
+                primary = true,
+                size = 26
+            ) { onOpen("play") }
+        }
+
+        // Bottom left: chat bar
+        NfPanel(Modifier.align(Alignment.BottomStart).width(300.dp)) {
+            NfText(
+                "[World] Kingz: Let's squad up!",
+                modifier = Modifier.padding(horizontal = 12.dp, vertical = 9.dp),
+                size = 12
+            )
+        }
     }
 }
 
 @Composable
-private fun Chip(text: String, color: Color) {
-    Box(
+private fun ProfileCard(name: String, level: Int) {
+    NfPanel(Modifier.fillMaxWidth()) {
+        Row(
+            Modifier.padding(8.dp),
+            verticalAlignment = Alignment.CenterVertically,
+            horizontalArrangement = Arrangement.spacedBy(10.dp)
+        ) {
+            Box(
+                Modifier
+                    .size(34.dp)
+                    .clip(CircleShape)
+                    .background(NfColors.Red)
+                    .border(2.dp, NfColors.Gold, CircleShape)
+            )
+            Column {
+                NfText(name, bold = true)
+                NfText("Lv.$level", size = 11, color = NfColors.TextDim)
+            }
+        }
+    }
+}
+
+@Composable
+private fun MenuRow(e: MenuEntry, onClick: () -> Unit) {
+    val shape = RoundedCornerShape(8.dp)
+    Row(
         Modifier
-            .clip(RoundedCornerShape(20.dp))
-            .background(NfColors.Panel)
-            .padding(horizontal = 12.dp, vertical = 6.dp)
+            .fillMaxWidth()
+            .clip(shape)
+            .background(Color(0x990B0F24))
+            .border(1.dp, Color(0x33FFFFFF), shape)
+            .clickable { onClick() }
+            .padding(horizontal = 10.dp, vertical = 8.dp),
+        verticalAlignment = Alignment.CenterVertically,
+        horizontalArrangement = Arrangement.spacedBy(10.dp)
     ) {
-        BasicText(
-            text,
-            style = TextStyle(color = color, fontSize = 14.sp, fontWeight = FontWeight.Bold)
-        )
+        Box(Modifier.size(14.dp).clip(RoundedCornerShape(4.dp)).background(e.color))
+        NfText(e.label.uppercase(), size = 13, bold = true)
+    }
+}
+
+@Composable
+private fun BattlePassCard() {
+    val shape = RoundedCornerShape(12.dp)
+    Row(
+        Modifier
+            .width(210.dp)
+            .clip(shape)
+            .background(NfBrush.Violet)
+            .border(1.dp, Color(0x66FFFFFF), shape)
+            .padding(12.dp),
+        verticalAlignment = Alignment.CenterVertically,
+        horizontalArrangement = Arrangement.spacedBy(10.dp)
+    ) {
+        Box(Modifier.size(30.dp).clip(CircleShape).background(Color(0x55FFFFFF)))
+        Column {
+            NfText("BATTLE PASS", bold = true)
+            NfText("SEASON 1", size = 12, color = NfColors.Gold, bold = true)
+        }
+    }
+}
+
+@Composable
+private fun GiftCard() {
+    NfPanel(Modifier.width(180.dp)) {
+        Column(Modifier.padding(10.dp)) {
+            NfText("FREE GIFTS", color = NfColors.Gold, bold = true)
+            NfText("23:45:12", size = 12, color = NfColors.TextDim)
+        }
     }
 }
