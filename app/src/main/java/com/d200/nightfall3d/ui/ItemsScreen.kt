@@ -2,6 +2,7 @@ package com.d200.nightfall3d.ui
 
 import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.layout.*
+import androidx.compose.ui.draw.alpha
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
@@ -65,7 +66,17 @@ fun ItemsScreen(api: GameApi, onBack: () -> Unit) {
 @Composable
 private fun ItemCard(item: GameItem, selected: Boolean, modifier: Modifier, onClick: () -> Unit) {
     NfPanel(modifier, selected = selected, onClick = onClick) {
-        ArtBlock(Modifier.fillMaxSize(), itemColor(item.category), Color(0xFF14183A), item.name.take(1))
+        ArtBlock(Modifier.fillMaxSize(), itemColor(item.category), Color(0xFF14183A))
+        NfIcon(
+            when (item.category) {
+                "Grenades" -> NfIconKind.TARGET
+                "Items" -> NfIconKind.MISSIONS
+                "Melee" -> NfIconKind.WEAPONS
+                else -> NfIconKind.SHIELD
+            },
+            Modifier.align(Alignment.Center).offset(y = (-14).dp).size(52.dp),
+            Color(0x88FFFFFF)
+        )
         Column(Modifier.align(Alignment.BottomStart).padding(10.dp)) {
             NfText(item.name, size = 14, bold = true)
             NfPrice(item.priceCoins, NfColors.Gold, false)
