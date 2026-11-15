@@ -31,11 +31,22 @@ import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.IntOffset
 import androidx.compose.ui.unit.dp
 import com.d200.nightfall3d.game.GameApi
+import com.d200.nightfall3d.game.GameInput
+import com.d200.nightfall3d.game.Game3DView
+import com.d200.nightfall3d.game.gunNames
 import com.d200.nightfall3d.ui.theme.*
+import kotlin.math.hypot
 import kotlin.math.roundToInt
 
 // In-game HUD built from the reference image (1672 x 941).
 // All icons are drawn in code (HudIcons.kt). No emojis, no stick figures, no image files for buttons.
+//
+// This screen now has the real 3D game behind it (Game3DView.kt). The buttons write into one GameInput:
+//   walk stick  -> move
+//   fire ring   -> aim + shoot (gun mode)   |   big fist button -> punch (hand mode)
+//   jump        -> jump
+//   Switch / Gun / Hand Fight -> gun mode or hand mode (fists: gun hidden, only punch / jump / crouch)
+//   weapon list -> which gun is in the hand
 //
 // One size system, so nothing looks random:
 //   BIG   112  shield, jump, crouch, prone, sprint
@@ -44,8 +55,6 @@ import kotlin.math.roundToInt
 //   TOP    58  mic, speaker, emoji, chat
 //   sticks 220 (walk) and 200 (fire ring)
 // One colour system: dark navy glass, steel ring when idle, Nightfall orange when active.
-//
-// The layout fills the whole screen: left items hug the left edge, right items hug the right edge.
 
 private val Glass = Color(0xE00A1230)
 private val GlassSoft = Color(0xB30A1230)
@@ -59,6 +68,9 @@ private const val BIG = 112f
 private const val MID = 88f
 private const val SMALL = 80f
 private const val TOP = 58f
+
+private const val FIRE_ON = 0.70f   // fire ring pushed past this = shoots
+private const val FIRE_OFF = 0.62f  // ...and stops again below this (small gap so it does not flicker)
 
 private fun isMelee(cat: String) = cat.equals("melee", ignoreCase = true)
 
@@ -268,6 +280,10 @@ fun HudScreen(api: GameApi, onExit: () -> Unit) {
     val guns = owned.filter { !isMelee(it.category) }.take(6)
     val melees = owned.filter { isMelee(it.category) }.take(6)
 
+    // The one object the 3D game reads. The buttons below write into it.
+    val input = remember { GameInput() }
+    val gunList = remember { gunNames() }
+
     var handMode by remember { mutableStateOf(false) }
     var gunIdx by remember { mutableStateOf(0) }
     var meleeIdx by remember { mutableStateOf(-1) } // -1 = bare fists
@@ -278,8 +294,20 @@ fun HudScreen(api: GameApi, onExit: () -> Unit) {
     var ducking by remember { mutableStateOf(false) }
     var symmetryOn by remember { mutableStateOf(false) }
 
+    /** Gun mode <-> hand mode. Hand mode hides the gun, stops shooting and turns the fire ring into a punch button. */
+    fun setHand(v: Boolean) {
+        handMode = v
+        menuOpen = false
+        scopeOn = false
+        input.handMode = v
+        input.shooting = false
+        input.aimHeld = false
+        input.aimX = 0f
+        input.aimY = 0f
+    }
+
     val options: List<String> =
-        if (handMode) listOf("Fists") + melees.map { it.name } else guns.map { it.name }
+        if (handMode) listOf("Fists") + melees.map { it.name } else gunList
     val selected = if (handMode) meleeIdx + 1 else gunIdx
     val currentName = options.getOrNull(selected) ?: "No weapon"
 
@@ -300,29 +328,22 @@ fun HudScreen(api: GameApi, onExit: () -> Unit) {
 
         // The frame fills the whole screen, so nothing is cut off and nothing floats in the middle.
         Box(Modifier.fillMaxSize()) {
-            // ---------------- scene (placeholder arena until the 3D view is wired in)
-            if (drawableId("hud_bg") != 0) {
-                ArtImage("hud_bg", Modifier.fillMaxSize(), ContentScale.Crop)
-            } else {
-                Box(
-                    Modifier
-                        .fillMaxSize()
-                        .background(Brush.verticalGradient(listOf(Color(0xFF3B4C73), Color(0xFF1C2238))))
-                )
-                CharacterSilhouette(Modifier.align(Alignment.Center).fillMaxHeight(0.62f).width(160.dp))
-            }
+            // ---------------- the real 3D game (arena, character, camera drag / pinch)
+            Game3DView(input = input, modifier = Modifier.fillMaxSize())
 
-            // crosshair
-            Canvas(Modifier.align(Alignment.Center).sized(k, 70f, 70f)) {
-                val c = Offset(size.width / 2f, size.height / 2f)
-                val r = size.minDimension * 0.30f
-                val w = Color(0xCCFFFFFF)
-                drawCircle(w, r, c, style = Stroke(2.5f))
-                drawLine(w, Offset(c.x, c.y - r - 8f), Offset(c.x, c.y - r + 6f), 2.5f)
-                drawLine(w, Offset(c.x, c.y + r - 6f), Offset(c.x, c.y + r + 8f), 2.5f)
-                drawLine(w, Offset(c.x - r - 8f, c.y), Offset(c.x - r + 6f, c.y), 2.5f)
-                drawLine(w, Offset(c.x + r - 6f, c.y), Offset(c.x + r + 8f, c.y), 2.5f)
-                drawCircle(Color(0xFFFF4D5E), 3f, c)
+            // crosshair (gun mode only)
+            if (!handMode) {
+                Canvas(Modifier.align(Alignment.Center).sized(k, 70f, 70f)) {
+                    val c = Offset(size.width / 2f, size.height / 2f)
+                    val r = size.minDimension * 0.30f
+                    val w = Color(0xCCFFFFFF)
+                    drawCircle(w, r, c, style = Stroke(2.5f))
+                    drawLine(w, Offset(c.x, c.y - r - 8f), Offset(c.x, c.y - r + 6f), 2.5f)
+                    drawLine(w, Offset(c.x, c.y + r - 6f), Offset(c.x, c.y + r + 8f), 2.5f)
+                    drawLine(w, Offset(c.x - r - 8f, c.y), Offset(c.x - r + 6f, c.y), 2.5f)
+                    drawLine(w, Offset(c.x + r - 6f, c.y), Offset(c.x + r + 8f, c.y), 2.5f)
+                    drawCircle(Color(0xFFFF4D5E), 3f, c)
+                }
             }
 
             // scope overlay (guns only)
@@ -459,7 +480,7 @@ fun HudScreen(api: GameApi, onExit: () -> Unit) {
                     .clip(slotShape)
                     .background(Glass)
                     .border((1.5f * k).dp, if (!handMode) Orange else Color(0x44FFFFFF), slotShape)
-                    .clickable { handMode = false; menuOpen = false }
+                    .clickable { setHand(false) }
             ) {
                 GlyphIcon(
                     Glyph.PISTOL,
@@ -487,13 +508,14 @@ fun HudScreen(api: GameApi, onExit: () -> Unit) {
                     .background(Glass)
                     .border((1.5f * k).dp, Color(0x44FFFFFF), slotShape)
             )
+            // the hand icon: tap it to go into punch mode
             Box(
                 atTR(k, 1568f, 170f, 90f)
                     .sized(k, 90f, 98f)
                     .clip(slotShape)
                     .background(Glass)
                     .border((1.5f * k).dp, if (handMode) Orange else Color(0x44FFFFFF), slotShape)
-                    .clickable { handMode = true; menuOpen = false }
+                    .clickable { setHand(true) }
             ) {
                 GlyphIcon(
                     Glyph.FIST,
@@ -514,11 +536,7 @@ fun HudScreen(api: GameApi, onExit: () -> Unit) {
                     .clip(switchShape)
                     .background(Glass)
                     .border((2 * k).dp, Orange, switchShape)
-                    .clickable {
-                        handMode = !handMode
-                        menuOpen = false
-                        scopeOn = false
-                    }
+                    .clickable { setHand(!handMode) }
             ) {
                 Row(Modifier.align(Alignment.Center), verticalAlignment = Alignment.CenterVertically) {
                     GlyphIcon(Glyph.SWITCH, Modifier.sized(k, 34f, 34f), main = Orange)
@@ -536,15 +554,8 @@ fun HudScreen(api: GameApi, onExit: () -> Unit) {
                     .border((2 * k).dp, Steel, selShape)
             ) {
                 Column(Modifier.fillMaxSize()) {
-                    SelRow(k, "Gun", Glyph.RIFLE, !handMode, true) {
-                        handMode = false
-                        menuOpen = false
-                    }
-                    SelRow(k, "Hand Fight", Glyph.FIST, handMode, false) {
-                        handMode = true
-                        menuOpen = false
-                        scopeOn = false
-                    }
+                    SelRow(k, "Gun", Glyph.RIFLE, !handMode, true) { setHand(false) }
+                    SelRow(k, "Hand Fight", Glyph.FIST, handMode, false) { setHand(true) }
                     SelRow(k, "Combat", Glyph.SWORDS, false, false) { }
                 }
             }
@@ -557,39 +568,58 @@ fun HudScreen(api: GameApi, onExit: () -> Unit) {
             CountBadge(k, atBL(k, 84f, 688f, 28f), "3")
             GlyphButton(k, atBL(k, 251f, 364f, BIG), BIG, Glyph.SPRINT, 0.58f, Orange, 3f, tint = Orange)
 
+            // walk stick -> the character moves
             Stick(k, 220f, false, atBL(k, 175f, 555f, 220f)) { x, y ->
-                // x, y in -1..1: wire to character movement here
+                input.joyX = x
+                input.joyY = y
             }
 
-            // ---------------- right: shield, fire ring, jump, crouch, prone, symmetry, scope, turret
-            GlyphButton(
-                k, atBR(k, 1257f, 485f, BIG, BIG), BIG, Glyph.SHIELD, 0.56f,
-                Steel, 3f, if (shieldOn) Color(0xE01B4DA0) else GlassSoft
-            ) { shieldOn = !shieldOn }
-
-            Stick(k, 200f, true, atBR(k, 1270f, 615f, 200f, 200f)) { x, y ->
-                // aim direction; shooting while the stick is held away from centre
+            // ---------------- right side
+            // shield: gun mode only
+            if (!handMode) {
+                GlyphButton(
+                    k, atBR(k, 1257f, 485f, BIG, BIG), BIG, Glyph.SHIELD, 0.56f,
+                    Steel, 3f, if (shieldOn) Color(0xE01B4DA0) else GlassSoft
+                ) { shieldOn = !shieldOn }
             }
 
-            GlyphButton(k, atBR(k, 1534f, 632f, BIG, BIG), BIG, Glyph.JUMP, 0.58f)
+            if (!handMode) {
+                // fire ring -> aim, and shoot when pushed to the outer edge
+                Stick(k, 200f, true, atBR(k, 1270f, 615f, 200f, 200f)) { x, y ->
+                    val m = hypot(x, y)
+                    input.aimHeld = m > 0.01f
+                    input.shooting = if (input.shooting) m >= FIRE_OFF else m >= FIRE_ON
+                    input.aimX = x
+                    input.aimY = y
+                }
+            } else {
+                // hand mode: the fire ring becomes one big PUNCH button (right, left, low, right ...)
+                GlyphButton(
+                    k, atBR(k, 1270f, 615f, 200f, 200f), 200f, Glyph.FIST, 0.52f,
+                    Orange, 4f, Glass, Orange
+                ) { input.punchTap = true }
+            }
+
+            // jump
+            GlyphButton(k, atBR(k, 1534f, 632f, BIG, BIG), BIG, Glyph.JUMP, 0.58f) { input.jumpTap = true }
             GlyphButton(
                 k, atBR(k, 1534f, 780f, BIG, BIG), BIG, Glyph.CROUCH, 0.58f,
                 if (ducking) Orange else RingIdle, if (ducking) 3f else 2f
             ) { ducking = !ducking }
             GlyphButton(k, atBR(k, 1324f, 822f, BIG, BIG), BIG, Glyph.PRONE, 0.58f)
 
-            // one aligned column of small buttons
-            GlyphButton(
-                k, atBR(k, 1130f, 600f, SMALL, SMALL), SMALL, Glyph.SYMMETRY, 0.60f,
-                if (symmetryOn) Orange else RingIdle, if (symmetryOn) 3f else 2f
-            ) { symmetryOn = !symmetryOn }
+            // one aligned column of small buttons (gun mode only)
             if (!handMode) {
+                GlyphButton(
+                    k, atBR(k, 1130f, 600f, SMALL, SMALL), SMALL, Glyph.SYMMETRY, 0.60f,
+                    if (symmetryOn) Orange else RingIdle, if (symmetryOn) 3f else 2f
+                ) { symmetryOn = !symmetryOn }
                 CodeButton(k, atBR(k, 1130f, 695f, SMALL, SMALL), SMALL, NfIconKind.SCOPE, scopeOn) {
                     scopeOn = !scopeOn
                 }
-            }
-            CodeButton(k, atBR(k, 1130f, 790f, SMALL, SMALL), SMALL, NfIconKind.TURRET, turretOn) {
-                turretOn = !turretOn
+                CodeButton(k, atBR(k, 1130f, 790f, SMALL, SMALL), SMALL, NfIconKind.TURRET, turretOn) {
+                    turretOn = !turretOn
+                }
             }
 
             // ---------------- bottom centre: armor + health bar
@@ -633,7 +663,12 @@ fun HudScreen(api: GameApi, onExit: () -> Unit) {
                             Modifier.fillMaxWidth().height((46 * k).dp),
                             selected = i == selected,
                             onClick = {
-                                if (handMode) meleeIdx = i - 1 else gunIdx = i
+                                if (handMode) {
+                                    meleeIdx = i - 1
+                                } else {
+                                    gunIdx = i
+                                    input.gunWanted = i      // puts that gun in his hand
+                                }
                                 menuOpen = false
                             }
                         ) {
