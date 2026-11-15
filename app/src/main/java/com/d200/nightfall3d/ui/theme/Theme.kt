@@ -103,7 +103,8 @@ fun NfText(
 enum class NfIconKind {
     STORE, GIFT, USER, WEAPONS, VAULT, PET, MISSIONS, EVENTS,
     SETTINGS, MAIL, SHIELD, BACK, GROUP,
-    GLOBE, OFFLINE, TARGET, LOCK, CHECK, JUMP, DUCK, BULLET, CLOSE
+    GLOBE, OFFLINE, TARGET, LOCK, CHECK, JUMP, DUCK, BULLET, CLOSE,
+    TURRET, SWAP, FIST, SHIELD_LINE, SCOPE
 }
 
 @Composable
@@ -268,6 +269,52 @@ fun NfIcon(
             NfIconKind.CLOSE -> {
                 drawLine(color, o(0.22f, 0.22f), o(0.78f, 0.78f), sw * 1.2f, StrokeCap.Round)
                 drawLine(color, o(0.78f, 0.22f), o(0.22f, 0.78f), sw * 1.2f, StrokeCap.Round)
+            }
+            NfIconKind.TURRET -> {
+                drawLine(color, o(0.50f, 0.54f), o(0.28f, 0.88f), sw, StrokeCap.Round)
+                drawLine(color, o(0.50f, 0.54f), o(0.72f, 0.88f), sw, StrokeCap.Round)
+                drawLine(color, o(0.50f, 0.54f), o(0.50f, 0.88f), sw, StrokeCap.Round)
+                drawCircle(color, s * 0.10f, o(0.46f, 0.42f), style = st)
+                drawLine(color, o(0.54f, 0.38f), o(0.90f, 0.26f), sw, StrokeCap.Round)
+            }
+            NfIconKind.SHIELD_LINE -> {
+                val p = Path().apply {
+                    moveTo(0.50f * s, 0.08f * s); lineTo(0.86f * s, 0.22f * s); lineTo(0.86f * s, 0.50f * s)
+                    quadraticBezierTo(0.86f * s, 0.78f * s, 0.50f * s, 0.92f * s)
+                    quadraticBezierTo(0.14f * s, 0.78f * s, 0.14f * s, 0.50f * s)
+                    lineTo(0.14f * s, 0.22f * s); close()
+                }
+                drawPath(p, color, style = st)
+                drawLine(color, o(0.50f, 0.26f), o(0.50f, 0.72f), sw * 0.8f, StrokeCap.Round)
+            }
+            NfIconKind.SCOPE -> {
+                drawCircle(color, s * 0.34f, o(0.5f, 0.5f), style = st)
+                drawLine(color, o(0.5f, 0.08f), o(0.5f, 0.40f), sw * 0.8f, StrokeCap.Round)
+                drawLine(color, o(0.5f, 0.60f), o(0.5f, 0.92f), sw * 0.8f, StrokeCap.Round)
+                drawLine(color, o(0.08f, 0.5f), o(0.40f, 0.5f), sw * 0.8f, StrokeCap.Round)
+                drawLine(color, o(0.60f, 0.5f), o(0.92f, 0.5f), sw * 0.8f, StrokeCap.Round)
+                drawCircle(color, s * 0.04f, o(0.5f, 0.5f))
+            }
+            NfIconKind.SWAP -> {
+                val k = Stroke(sw, cap = StrokeCap.Round, join = StrokeJoin.Round)
+                drawLine(color, o(0.15f, 0.32f), o(0.85f, 0.32f), sw, StrokeCap.Round)
+                drawLine(color, o(0.85f, 0.68f), o(0.15f, 0.68f), sw, StrokeCap.Round)
+                val a = Path().apply {
+                    moveTo(0.65f * s, 0.14f * s); lineTo(0.85f * s, 0.32f * s); lineTo(0.65f * s, 0.50f * s)
+                }
+                val b = Path().apply {
+                    moveTo(0.35f * s, 0.50f * s); lineTo(0.15f * s, 0.68f * s); lineTo(0.35f * s, 0.86f * s)
+                }
+                drawPath(a, color, style = k)
+                drawPath(b, color, style = k)
+            }
+            NfIconKind.FIST -> {
+                drawRoundRect(color, o(0.25f, 0.44f), z(0.46f, 0.42f), CornerRadius(s * 0.10f))
+                drawCircle(color, s * 0.075f, o(0.32f, 0.40f))
+                drawCircle(color, s * 0.075f, o(0.43f, 0.37f))
+                drawCircle(color, s * 0.075f, o(0.54f, 0.37f))
+                drawCircle(color, s * 0.075f, o(0.65f, 0.40f))
+                drawRoundRect(color, o(0.68f, 0.52f), z(0.16f, 0.20f), CornerRadius(s * 0.06f))
             }
             NfIconKind.GROUP -> {
                 drawCircle(color, s * 0.14f, o(0.36f, 0.32f))
