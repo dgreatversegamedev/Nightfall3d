@@ -2,6 +2,7 @@ package com.d200.nightfall3d.ui
 
 import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.*
+import androidx.compose.ui.unit.Dp
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.runtime.Composable
@@ -73,9 +74,21 @@ fun StoreScreen(api: GameApi, onBack: () -> Unit) {
 private fun StoreCard(item: StoreItem, modifier: Modifier) {
     NfPanel(modifier) {
         ArtBlock(Modifier.fillMaxSize(), Color(0xFF3A2A6B), Color(0xFF14183A))
-        GunSilhouette(
-            Modifier.align(Alignment.Center).fillMaxWidth(0.7f).fillMaxHeight(0.4f)
-        )
+        when (item.category.lowercase()) {
+            "weapons" -> GunSilhouette(
+                Modifier.align(Alignment.Center).fillMaxWidth(0.7f).fillMaxHeight(0.4f)
+            )
+            "characters" -> NfIcon(
+                NfIconKind.USER,
+                Modifier.align(Alignment.Center).offset(y = (-10).dp).size(54.dp),
+                Color(0x66FFFFFF)
+            )
+            else -> NfIcon(
+                NfIconKind.GIFT,
+                Modifier.align(Alignment.Center).offset(y = (-10).dp).size(54.dp),
+                NfColors.Gold
+            )
+        }
         Box(
             Modifier
                 .align(Alignment.BottomCenter)
