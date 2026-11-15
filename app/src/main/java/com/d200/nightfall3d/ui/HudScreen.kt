@@ -32,6 +32,7 @@ import androidx.compose.ui.unit.IntOffset
 import androidx.compose.ui.unit.dp
 import com.d200.nightfall3d.game.GameApi
 import com.d200.nightfall3d.game.GameInput
+import com.d200.nightfall3d.game.CHAR_FILES
 import com.d200.nightfall3d.game.Game3DView
 import com.d200.nightfall3d.game.gunNames
 import com.d200.nightfall3d.ui.theme.*
@@ -282,6 +283,9 @@ fun HudScreen(api: GameApi, onExit: () -> Unit) {
 
     // The one object the 3D game reads. The buttons below write into it.
     val input = remember { GameInput() }
+    // the character picked on the Character screen (blue is the only real one for now)
+    val pickedGlb = api.characters().firstOrNull { it.id == api.selectedCharacterId }?.glbPath ?: "char_blue.glb"
+    val charIndex = CHAR_FILES.indexOf(pickedGlb).let { if (it < 0) 0 else it }
     val gunList = remember { gunNames() }
 
     var handMode by remember { mutableStateOf(false) }
@@ -304,6 +308,8 @@ fun HudScreen(api: GameApi, onExit: () -> Unit) {
         input.aimHeld = false
         input.aimX = 0f
         input.aimY = 0f
+        shieldOn = false
+        input.shieldOn = false
     }
 
     val options: List<String> =
@@ -329,7 +335,7 @@ fun HudScreen(api: GameApi, onExit: () -> Unit) {
         // The frame fills the whole screen, so nothing is cut off and nothing floats in the middle.
         Box(Modifier.fillMaxSize()) {
             // ---------------- the real 3D game (arena, character, camera drag / pinch)
-            Game3DView(input = input, modifier = Modifier.fillMaxSize())
+            Game3DView(input = input, modifier = Modifier.fillMaxSize(), charIndex = charIndex)
 
             // crosshair (gun mode only)
             if (!handMode) {
@@ -580,7 +586,10 @@ fun HudScreen(api: GameApi, onExit: () -> Unit) {
                 GlyphButton(
                     k, atBR(k, 1257f, 485f, BIG, BIG), BIG, Glyph.SHIELD, 0.56f,
                     Steel, 3f, if (shieldOn) Color(0xE01B4DA0) else GlassSoft
-                ) { shieldOn = !shieldOn }
+                ) {
+                    shieldOn = !shieldOn
+                    input.shieldOn = shieldOn      // shield bubble around the character
+                }
             }
 
             if (!handMode) {
@@ -605,7 +614,10 @@ fun HudScreen(api: GameApi, onExit: () -> Unit) {
             GlyphButton(
                 k, atBR(k, 1534f, 780f, BIG, BIG), BIG, Glyph.CROUCH, 0.58f,
                 if (ducking) Orange else RingIdle, if (ducking) 3f else 2f
-            ) { ducking = !ducking }
+            ) {
+                ducking = !ducking
+                input.crouch = ducking             // character bends down
+            }
             GlyphButton(k, atBR(k, 1324f, 822f, BIG, BIG), BIG, Glyph.PRONE, 0.58f)
 
             // one aligned column of small buttons (gun mode only)
