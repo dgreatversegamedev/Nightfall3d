@@ -44,6 +44,8 @@ import kotlin.math.roundToInt
 //   TOP    58  mic, speaker, emoji, chat
 //   sticks 220 (walk) and 200 (fire ring)
 // One colour system: dark navy glass, steel ring when idle, Nightfall orange when active.
+//
+// The layout fills the whole screen: left items hug the left edge, right items hug the right edge.
 
 private val Glass = Color(0xE00A1230)
 private val GlassSoft = Color(0xB30A1230)
@@ -281,12 +283,7 @@ fun HudScreen(api: GameApi, onExit: () -> Unit) {
     val selected = if (handMode) meleeIdx + 1 else gunIdx
     val currentName = options.getOrNull(selected) ?: "No weapon"
 
-    val squad = listOf(
-        Pair(p.name, Color(0xFF16C6D8)),
-        Pair("BellaGirl", Color(0xFFFF9A00)),
-        Pair("RazonX", Color(0xFFC84DFF)),
-        Pair("ShadowKing", Color(0xFF22D17A))
-    )
+    // The squad list is not shown here. It will appear when real players are in the match.
 
     BoxWithConstraints(
         Modifier
@@ -300,20 +297,12 @@ fun HudScreen(api: GameApi, onExit: () -> Unit) {
         } else {
             minOf(maxWidth.value, maxHeight.value) / 1100f
         }
-        val frame = if (landscape) {
-            Modifier.align(Alignment.Center).sized(k, REF_W, REF_H)
-        } else {
-            Modifier.fillMaxSize()
-        }
 
-        Box(frame) {
+        // The frame fills the whole screen, so nothing is cut off and nothing floats in the middle.
+        Box(Modifier.fillMaxSize()) {
             // ---------------- scene (placeholder arena until the 3D view is wired in)
             if (drawableId("hud_bg") != 0) {
-                ArtImage(
-                    "hud_bg",
-                    Modifier.fillMaxSize(),
-                    if (landscape) ContentScale.FillBounds else ContentScale.Crop
-                )
+                ArtImage("hud_bg", Modifier.fillMaxSize(), ContentScale.Crop)
             } else {
                 Box(
                     Modifier
@@ -347,7 +336,7 @@ fun HudScreen(api: GameApi, onExit: () -> Unit) {
                 }
             }
 
-            // ---------------- top left: minimap, squad list, voice / emoji / chat
+            // ---------------- top left: minimap, voice / emoji / chat
             val mapShape = RoundedCornerShape((8 * k).dp)
             Box(
                 atTL(k, 12f, 12f)
@@ -356,89 +345,10 @@ fun HudScreen(api: GameApi, onExit: () -> Unit) {
                     .border((2 * k).dp, Orange, mapShape)
             ) { ArtImage("hud_minimap", Modifier.fillMaxSize(), ContentScale.Crop) }
 
-            squad.forEachIndexed { i, entry ->
-                Row(
-                    atTL(k, 12f, 230f + i * 37f).sized(k, 210f, 32f),
-                    verticalAlignment = Alignment.CenterVertically
-                ) {
-                    Box(
-                        Modifier.width((28 * k).dp).fillMaxHeight().background(entry.second),
-                        contentAlignment = Alignment.Center
-                    ) { NfText("${i + 1}", size = fsz(k, 20f), bold = true) }
-                    Box(
-                        Modifier
-                            .weight(1f)
-                            .fillMaxHeight()
-                            .background(Brush.horizontalGradient(listOf(Color(0xB3000000), Color(0x00000000))))
-                    ) {
-                        Row(
-                            Modifier.align(Alignment.CenterStart).padding(start = (8 * k).dp),
-                            verticalAlignment = Alignment.CenterVertically
-                        ) {
-                            NfText(entry.first, size = fsz(k, 21f), bold = true, maxLines = 1)
-                            if (i == 0) NfText(" \u2605", size = fsz(k, 18f), color = NfColors.Gold)
-                        }
-                        Box(
-                            Modifier
-                                .align(Alignment.BottomStart)
-                                .padding(start = (8 * k).dp)
-                                .width((170 * k).dp)
-                                .height((3 * k).dp)
-                                .background(Color(0xD9FFFFFF))
-                        )
-                    }
-                }
-            }
-
             GlyphButton(k, atTL(k, 260f, 9f), TOP, Glyph.MIC_OFF, 0.50f)
             GlyphButton(k, atTL(k, 260f, 84f), TOP, Glyph.SPK_OFF, 0.50f)
             GlyphButton(k, atTL(k, 343f, 84f), TOP, Glyph.EMOJI, 0.52f)
             GlyphButton(k, atTL(k, 260f, 161f), TOP, Glyph.CHAT, 0.52f)
-
-            // ---------------- top centre: compass (landscape only)
-            if (landscape) {
-                Box(atTL(k, 500f, 6f).sized(k, 545f, 56f)) {
-                    Box(
-                        Modifier
-                            .fillMaxSize()
-                            .background(
-                                Brush.horizontalGradient(
-                                    listOf(Color(0x00000000), Color(0xB30B1430), Color(0x00000000))
-                                )
-                            )
-                    )
-                    Row(
-                        Modifier.fillMaxSize().padding(top = (10 * k).dp),
-                        horizontalArrangement = Arrangement.SpaceEvenly,
-                        verticalAlignment = Alignment.CenterVertically
-                    ) {
-                        val marks = listOf("NW", "330", "345", "N", "15", "30", "NE", "60", "75", "E", "80")
-                        marks.forEach { m ->
-                            val cardinal = m == "N" || m == "NE" || m == "E" || m == "NW"
-                            NfText(
-                                m,
-                                size = fsz(k, if (cardinal) 27f else 23f),
-                                bold = cardinal,
-                                color = if (m == "NW" || m == "80") NfColors.TextDim else Color.White
-                            )
-                        }
-                    }
-                    Canvas(
-                        Modifier
-                            .align(Alignment.TopStart)
-                            .offset((318 * k).dp, 0.dp)
-                            .sized(k, 20f, 12f)
-                    ) {
-                        val tri = Path().apply {
-                            moveTo(0f, 0f)
-                            lineTo(size.width, 0f)
-                            lineTo(size.width / 2f, size.height)
-                            close()
-                        }
-                        drawPath(tri, Color.White)
-                    }
-                }
-            }
 
             // ---------------- top right: currency (landscape), players, kills, settings
             // All four boxes use the same dark glass. Only the small icon carries colour.
@@ -639,7 +549,7 @@ fun HudScreen(api: GameApi, onExit: () -> Unit) {
                 }
             }
 
-            // ---------------- left: backpack, medkit, grenade, sprint, walk stick, Help
+            // ---------------- left: backpack, medkit, grenade, sprint, walk stick
             GlyphButton(k, atBL(k, 26f, 418f, MID), MID, Glyph.BACKPACK, 0.58f, Orange, 3f)
             GlyphButton(k, atBL(k, 26f, 530f, MID), MID, Glyph.MEDKIT, 0.58f)
             CountBadge(k, atBL(k, 84f, 576f, 28f), "5")
@@ -649,27 +559,6 @@ fun HudScreen(api: GameApi, onExit: () -> Unit) {
 
             Stick(k, 220f, false, atBL(k, 175f, 555f, 220f)) { x, y ->
                 // x, y in -1..1: wire to character movement here
-            }
-
-            val slant = SlantShape((18 * k).dp)
-            Box(
-                atBL(k, 24f, 810f, 88f)
-                    .sized(k, 232f, 88f)
-                    .clip(slant)
-                    .background(Brush.horizontalGradient(listOf(Color(0xFF0E2A5C), Color(0xFF0A1A3C))))
-                    .border((2 * k).dp, Steel, slant)
-            ) {
-                GlyphIcon(
-                    Glyph.WOLF,
-                    Modifier.align(Alignment.CenterStart).padding(start = (40 * k).dp).sized(k, 62f, 62f),
-                    cut = Color(0xFF0E2A5C)
-                )
-                NfText(
-                    "Help",
-                    Modifier.align(Alignment.CenterStart).padding(start = (122 * k).dp),
-                    size = fsz(k, 36f),
-                    bold = true
-                )
             }
 
             // ---------------- right: shield, fire ring, jump, crouch, prone, symmetry, scope, turret
