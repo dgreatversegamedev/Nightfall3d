@@ -42,7 +42,9 @@ data class Character(
     val speed: Float,
     val damage: Float,
     val color: Long,
-    val glbPath: String
+    val glbPath: String,          // file in app/src/main/assets/, for example "char_blue.glb"
+    val level: Int = 1,           // this character's level
+    val rank: String = "Rookie"   // this character's rank
 )
 
 data class GameItem(val id: String, val name: String, val category: String, val priceCoins: Int)
