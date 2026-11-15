@@ -19,7 +19,9 @@ import androidx.compose.ui.geometry.Size
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.layout.ContentScale
+import androidx.compose.ui.unit.TextUnit
 import androidx.compose.ui.unit.dp
+import androidx.compose.ui.unit.sp
 import com.d200.nightfall3d.game.GameApi
 import com.d200.nightfall3d.ui.theme.*
 
@@ -35,6 +37,23 @@ import com.d200.nightfall3d.ui.theme.*
 // Icons are drawn in code (HudIcons.kt). Art images are only used for the background,
 // banner, battle royale picture, booyah pass logo and the avatar.
 // One colour system: navy glass, steel/white lines, Nightfall orange for highlights.
+
+// ------------------------------------------------------------------ layout helpers
+// If any of these already exist elsewhere in the package, delete the copy here.
+
+private const val REF_W = 1672f
+private const val REF_H = 941f
+
+/** Size in reference pixels, scaled by k. */
+private fun Modifier.sized(k: Float, w: Float, h: Float): Modifier =
+    this.size((w * k).dp, (h * k).dp)
+
+/** Position from the top-left corner in reference pixels, scaled by k. */
+private fun atTL(k: Float, x: Float, y: Float): Modifier =
+    Modifier.offset((x * k).dp, (y * k).dp)
+
+/** Font size in reference pixels, scaled by k. */
+private fun fsz(k: Float, px: Float): TextUnit = (px * k).sp
 
 private val Navy = Color(0xEB0A1230)
 private val Orange = Color(0xFFFF8A00)
@@ -287,7 +306,7 @@ private fun PortraitMenu(k: Float, name: String, level: Int, coins: Int, diamond
 
             // menu rows (left) + booyah pass and mode card (right)
             Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.Top) {
-                Column(verticalArrangement = Arrangement.spacedBy(8.dp * k)) {
+                Column(verticalArrangement = Arrangement.spacedBy((8 * k).dp)) {
                     entries.forEach { e -> MenuRow(k, e, Modifier) { go(e.route) } }
                 }
                 Spacer(Modifier.weight(1f))
@@ -522,7 +541,7 @@ private fun MenuBox(k: Float, modifier: Modifier) {
             .background(Navy)
             .border((2 * k).dp, Orange, shape),
         contentAlignment = Alignment.Center
-    ) { GlyphIcon(Glyph.CUBE, Modifier.sized(k, 72f, 72f)) }
+    ) { GlyphIcon(Glyph.INVENTORY, Modifier.sized(k, 72f, 72f)) } // was Glyph.CUBE (not defined)
 }
 
 @Composable
