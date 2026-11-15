@@ -24,7 +24,9 @@ import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.geometry.Size
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.Outline
 import androidx.compose.ui.graphics.Path
+import androidx.compose.ui.graphics.Shape
 import androidx.compose.ui.graphics.StrokeCap
 import androidx.compose.ui.graphics.StrokeJoin
 import androidx.compose.ui.graphics.drawscope.Stroke
@@ -33,7 +35,9 @@ import androidx.compose.ui.text.TextStyle
 import androidx.compose.ui.text.font.FontStyle
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
+import androidx.compose.ui.unit.Density
 import androidx.compose.ui.unit.Dp
+import androidx.compose.ui.unit.LayoutDirection
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 
@@ -67,6 +71,17 @@ object NfBrush {
     val Blue = Brush.verticalGradient(listOf(Color(0xFF45B4FF), Color(0xFF1666D6)))
     val Glow = Brush.linearGradient(listOf(Color(0x4435D3FF), Color(0x228B5CF6)))
     val Row = Brush.horizontalGradient(listOf(Color(0xCC0B0F24), Color(0x330B0F24)))
+}
+
+/** Slanted (parallelogram) shape used by the gold buttons, like the reference PLAY button. */
+class SlantShape(private val skew: Dp = 10.dp) : Shape {
+    override fun createOutline(size: Size, layoutDirection: LayoutDirection, density: Density): Outline {
+        val k = with(density) { skew.toPx() }.coerceAtMost(size.width / 3f)
+        val p = Path().apply {
+            moveTo(k, 0f); lineTo(size.width, 0f); lineTo(size.width - k, size.height); lineTo(0f, size.height); close()
+        }
+        return Outline.Generic(p)
+    }
 }
 
 fun formatNum(n: Int): String = n.toString().reversed().chunked(3).joinToString(",").reversed()
@@ -333,13 +348,13 @@ fun NfIconButton(
     size: Dp = 36.dp,
     onClick: () -> Unit
 ) {
-    val shape = RoundedCornerShape(10.dp)
+    val shape = RoundedCornerShape(8.dp)
     Box(
         modifier
             .size(size)
             .clip(shape)
-            .background(NfBrush.Panel)
-            .border(1.dp, NfBrush.Glow, shape)
+            .background(Color(0xE60A0E22))
+            .border(1.dp, Color(0x22FFFFFF), shape)
             .clickable { onClick() },
         contentAlignment = Alignment.Center
     ) {
@@ -375,29 +390,31 @@ fun NfPanel(
     Box(m, content = content)
 }
 
-/** Dark translucent list row with an icon, used for the main menu. */
+/** Solid dark menu button that fits its content, like the reference main menu. */
 @Composable
 fun NfMenuRow(
     label: String,
     icon: NfIconKind,
     accent: Color,
     modifier: Modifier = Modifier,
+    highlight: Boolean = false,
+    badge: Boolean = false,
     onClick: () -> Unit
 ) {
-    val shape = RoundedCornerShape(10.dp)
+    val shape = RoundedCornerShape(8.dp)
     Row(
         modifier
-            .fillMaxWidth()
             .clip(shape)
-            .background(NfBrush.Row)
-            .border(1.dp, Color(0x1AFFFFFF), shape)
+            .background(Color(0xE60A0E22))
+            .border(1.dp, if (highlight) NfColors.Gold.copy(alpha = 0.9f) else Color(0x22FFFFFF), shape)
             .clickable { onClick() }
-            .padding(horizontal = 10.dp, vertical = 7.dp),
+            .padding(horizontal = 10.dp, vertical = 5.dp),
         verticalAlignment = Alignment.CenterVertically,
-        horizontalArrangement = Arrangement.spacedBy(10.dp)
+        horizontalArrangement = Arrangement.spacedBy(8.dp)
     ) {
         NfIcon(icon, Modifier.size(20.dp), accent)
-        NfText(label.uppercase(), size = 13, bold = true)
+        NfText(label.uppercase(), size = 13, bold = true, color = if (highlight) NfColors.Gold else NfColors.Text)
+        if (badge) Box(Modifier.size(7.dp).clip(CircleShape).background(NfColors.Red))
     }
 }
 
@@ -430,14 +447,14 @@ fun NfButton(
     val shape = if (style == BtnStyle.DARK) {
         RoundedCornerShape(10.dp)
     } else {
-        CutCornerShape(topEnd = 14.dp, bottomStart = 14.dp)
+        SlantShape(10.dp)
     }
     Box(
         modifier
             .drawBehind {
                 if (style != BtnStyle.DARK) {
                     drawRoundRect(
-                        glowColor.copy(alpha = 0.18f),
+                        glowColor.copy(alpha = 0.12f),
                         Offset(-4f, -4f),
                         Size(this.size.width + 8f, this.size.height + 8f),
                         CornerRadius(24f)
@@ -452,7 +469,7 @@ fun NfButton(
                     // gloss highlight on the top half
                     drawRect(
                         Brush.verticalGradient(
-                            listOf(Color(0x66FFFFFF), Color.Transparent),
+                            listOf(Color(0x33FFFFFF), Color.Transparent),
                             endY = this.size.height * 0.5f
                         ),
                         size = Size(this.size.width, this.size.height * 0.5f)
@@ -476,7 +493,7 @@ fun NfButton(
             color = textColor,
             bold = true,
             align = TextAlign.Center,
-            italic = style == BtnStyle.GOLD && size >= 20
+            italic = style == BtnStyle.GOLD
         )
     }
 }
@@ -508,12 +525,12 @@ fun CoinDot(color: Color, diamond: Boolean = false) {
 
 @Composable
 fun CurrencyChip(value: Int, color: Color, diamond: Boolean = false) {
-    val shape = RoundedCornerShape(20.dp)
+    val shape = RoundedCornerShape(8.dp)
     Row(
         Modifier
             .clip(shape)
-            .background(NfBrush.Panel)
-            .border(1.dp, NfBrush.Glow, shape)
+            .background(Color(0xE60A0E22))
+            .border(1.dp, Color(0x22FFFFFF), shape)
             .padding(horizontal = 12.dp, vertical = 5.dp),
         verticalAlignment = Alignment.CenterVertically,
         horizontalArrangement = Arrangement.spacedBy(6.dp)
@@ -612,7 +629,7 @@ private fun TabChip(
     modifier: Modifier = Modifier,
     onClick: () -> Unit
 ) {
-    val shape = CutCornerShape(topEnd = 10.dp, bottomStart = 10.dp)
+    val shape = RoundedCornerShape(6.dp)
     Box(
         modifier
             .clip(shape)
