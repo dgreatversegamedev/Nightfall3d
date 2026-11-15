@@ -97,6 +97,14 @@ import kotlin.math.sqrt
 //
 // Needs in app/src/main/assets/ : arena_play.glb, arena_play.json, char_blue.glb
 // Optional (gun in hand): mp5_gun.glb, ak47_gun.glb, ar_gun.glb  (the game still works without them)
+//
+// CHANGES IN THIS VERSION
+//  1) AIMING: bullets now fly exactly where the fire ring points (any direction, 360 degrees).
+//     Before, they flew where his body was facing at that moment, and the body turns a bit late,
+//     and the hand is to the side of his body. Now the bullet goes from the gun toward a point
+//     AIM_POINT_DIST meters out along the ring direction. Aiming never changes where he walks or stands.
+//  2) JUMPING: tryMove() and groundY() now get his feet height, so low things (sandbags, barrels)
+//     can be jumped over and crates can be landed on. Needs the new PlayArena.kt.
 // =====================================================================
 
 // ---- Tuning numbers: change these if something looks wrong ----
@@ -130,6 +138,7 @@ private const val BULLET_SPEED = 40f          // meters per second
 private const val BULLET_RANGE = 50f          // bullet disappears after this distance
 private const val FIRE_INTERVAL = 0.12f       // seconds between shots while the fire stick is held
 private const val MUZZLE_FORWARD = 0.5f       // bullet starts this far in front of the HAND (about the gun length)
+private const val AIM_POINT_DIST = 12f        // the bullet aims at the point this far from him along the ring direction
 // Fallback only (used if the hand position cannot be read): start point measured from his body
 private const val BULLET_HEIGHT = 1.15f
 private const val BULLET_START_FORWARD = 0.9f
@@ -229,7 +238,7 @@ internal val CHAR_NAMES = listOf("Blue", "Red", "Aqua")
 // Plain values the game loop changes every frame (no Compose redraw needed)
 internal class GameInput {
     var x = 0f
-    var y = 0f               // floor height under him (platform / ramp)
+    var y = 0f               // floor height under him (platform / ramp / top of a box he stands on)
     var z = 0f
     var play: PlayArena? = null   // walls + ramp, filled when arena_play.json is read
     var camPitch = 0f        // degrees the camera is raised (drag up/down)
@@ -580,15 +589,22 @@ private fun stepGame(
     rig.speed += (targetSpeed - rig.speed).coerceIn(-maxChange, maxChange)
 
     // Move, with sliding along walls (rules copied from the HTML)
+    // Walking only uses the move stick. Aiming / shooting never changes x, y or z.
     val play = rig.play
     if (play != null) {
+        // how high his feet are right now. Low things (sandbags, barrels) do not block him
+        // when his feet are above their top, so he can jump over them or land on them.
+        val feet = rig.y + rig.jumpH
         val nx = rig.x + rig.moveX * rig.speed * dt
         val nz = rig.z + rig.moveZ * rig.speed * dt
-        play.tryMove(rig.x, rig.z, nx, nz)
+        play.tryMove(rig.x, rig.z, nx, nz, feet)
         rig.x = play.outX
         rig.z = play.outZ
         // go up / down the ramp smoothly
-        rig.y += (play.groundY(rig.x, rig.z) - rig.y) * min(1f, dt * 20f)
+        val oldY = rig.y
+        rig.y += (play.groundY(rig.x, rig.z, feet) - rig.y) * min(1f, dt * 20f)
+        // in the air, a changing floor must not push him up or down by itself
+        if (rig.jumpState == 2) rig.jumpH -= (rig.y - oldY)
     }
 
     // Where the aim stick points (relative to the camera). He turns to it whenever a finger is on the stick
@@ -618,10 +634,14 @@ private fun stepGame(
         rig.faceDeg += diff.coerceIn(-maxTurn, maxTurn)
     }
 
-    // The way he is facing right now (= the way the gun points). Bullets fly this way.
+    // The way he is facing right now (= the way the gun points on screen).
     val faceR = (rig.faceDeg - FACING_OFFSET) * DEG_TO_RAD
     val sx = cos(faceR)
     val sz = -sin(faceR)
+
+    // The way the aim ring points (the real shooting direction). Same as his facing when he is not aiming.
+    val aimDirX = if (aiming) tx else sx
+    val aimDirZ = if (aiming) tz else sz
 
     // Pick the animation from the real speed
     val base = if (rig.speed < 0.15f) "idle" else if (rig.speed > (WALK_SPEED + RUN_SPEED) / 2f) "run" else "walk"
@@ -679,11 +699,22 @@ private fun stepGame(
             rig.mz = rig.hand[2] + sz * MUZZLE_FORWARD
         } else {
             rig.mx = rig.x + sx * BULLET_START_FORWARD - sz * BULLET_START_SIDE
-            rig.my = rig.y + BULLET_HEIGHT
+            rig.my = rig.y + rig.jumpH + BULLET_HEIGHT
             rig.mz = rig.z + sz * BULLET_START_FORWARD + sx * BULLET_START_SIDE
         }
     }
-    updateBullets(dt, rig, bullets, sx, sz)
+
+    // The bullet flies from the gun toward the point the ring is aimed at, so it goes where you aim,
+    // not where his body happens to be turned (the body turns a little later and the hand is to the side).
+    var bdirX = aimDirX
+    var bdirZ = aimDirZ
+    if (rig.shooting) {
+        val toX = rig.x + aimDirX * AIM_POINT_DIST - rig.mx
+        val toZ = rig.z + aimDirZ * AIM_POINT_DIST - rig.mz
+        val len = hypot(toX, toZ)
+        if (len > 0.5f) { bdirX = toX / len; bdirZ = toZ / len }
+    }
+    updateBullets(dt, rig, bullets, bdirX, bdirZ)
     updateShield(rig, shieldNodes, nanos)
 
     // Chest-level follow camera (distance = pinch zoom, direction = drag)
@@ -795,6 +826,7 @@ private fun updateShield(rig: GameInput, nodes: List<CubeNode>, nanos: Long) {
 
 // ---------------- Bullets ----------------
 
+// fx, fz = the direction every new bullet flies in (horizontal, length 1)
 private fun updateBullets(dt: Float, rig: GameInput, bullets: List<CubeNode>, fx: Float, fz: Float) {
     if (!rig.shooting) rig.fireTimer = 0f
     rig.fireTimer -= dt
