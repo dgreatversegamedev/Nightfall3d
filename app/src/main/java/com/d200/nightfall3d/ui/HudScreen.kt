@@ -4,6 +4,8 @@ import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.gestures.awaitEachGesture
+import androidx.compose.foundation.gestures.awaitFirstDown
 import androidx.compose.foundation.gestures.detectDragGestures
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.rememberScrollState
@@ -131,7 +133,9 @@ private fun CodeButton(
 
 /**
  * Draggable stick. Reports x/y in -1..1 through [onChange].
- * Left stick walks. Right stick (the bullet ring) aims and shoots.
+ * Left stick walks (moves from where you first touch it).
+ * Right stick (the bullet ring) aims and shoots. It measures your finger from the CENTRE of the ring,
+ * so the direction you see is the direction you aim, in every direction (left, middle, right, back).
  */
 @Composable
 private fun Stick(
@@ -150,17 +154,42 @@ private fun Stick(
             .background(Color(0x33FFFFFF))
             .border((if (fire) 4f else 2f).times(k).dp, if (fire) OrangeDark else Color(0x55FFFFFF), CircleShape)
             .pointerInput(Unit) {
-                detectDragGestures(
-                    onDragStart = { off = Offset.Zero },
-                    onDragEnd = { off = Offset.Zero; onChange(0f, 0f) },
-                    onDragCancel = { off = Offset.Zero; onChange(0f, 0f) }
-                ) { change, drag ->
-                    change.consume()
-                    var n = off + drag
-                    val d = n.getDistance()
-                    if (d > maxR) n = n * (maxR / d)
-                    off = n
-                    onChange(n.x / maxR, n.y / maxR)
+                if (fire) {
+                    awaitEachGesture {
+                        val down = awaitFirstDown(requireUnconsumed = false)
+                        val c = Offset(size.width / 2f, size.height / 2f)
+                        fun push(p: Offset) {
+                            var v = p - c
+                            val d = v.getDistance()
+                            if (d > maxR) v = v * (maxR / d)
+                            off = v
+                            onChange(v.x / maxR, v.y / maxR)
+                        }
+                        push(down.position)
+                        down.consume()
+                        while (true) {
+                            val event = awaitPointerEvent()
+                            val ch = event.changes.firstOrNull { it.id == down.id } ?: break
+                            if (!ch.pressed) break
+                            push(ch.position)
+                            ch.consume()
+                        }
+                        off = Offset.Zero
+                        onChange(0f, 0f)
+                    }
+                } else {
+                    detectDragGestures(
+                        onDragStart = { off = Offset.Zero },
+                        onDragEnd = { off = Offset.Zero; onChange(0f, 0f) },
+                        onDragCancel = { off = Offset.Zero; onChange(0f, 0f) }
+                    ) { change, drag ->
+                        change.consume()
+                        var n = off + drag
+                        val d = n.getDistance()
+                        if (d > maxR) n = n * (maxR / d)
+                        off = n
+                        onChange(n.x / maxR, n.y / maxR)
+                    }
                 }
             },
         contentAlignment = Alignment.Center
