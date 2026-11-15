@@ -1,0 +1,29 @@
+name: Clean Old Runs
+
+on:
+  workflow_dispatch:
+  workflow_run:
+    workflows: ["Build Preview APK"]
+    types: [completed]
+
+permissions:
+  actions: write
+  contents: read
+
+jobs:
+  clean:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Delete all but the newest 10 runs
+        env:
+          GH_TOKEN: ${{ github.token }}
+          KEEP: 10
+        run: |
+          gh api --paginate "repos/${{ github.repository }}/actions/runs?per_page=100" \
+            --jq '.workflow_runs[] | select(.status == "completed") | [.created_at, .id] | @tsv' \
+            | sort -r \
+            | awk -v keep="$KEEP" 'NR > keep { print $2 }' \
+            | while read -r id; do
+                echo "Deleting run $id"
+                gh api -X DELETE "repos/${{ github.repository }}/actions/runs/$id" || true
+              done
