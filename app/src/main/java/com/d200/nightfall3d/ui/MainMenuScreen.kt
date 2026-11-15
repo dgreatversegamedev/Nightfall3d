@@ -97,7 +97,9 @@ private val Navy = Color(0xEB0A1230)
 private val Orange = Color(0xFFFF8A00)
 private val OrangeDark = Color(0xFFC96A00)
 private val RankBlue = Color(0xFF35B6FF)
-private val Line = Color(0x33FFFFFF)
+private val Line = Color(0x4DFFFFFF)
+/** Glass morphism: frosted white tint over the scene, thin light border. */
+private val GlassBrush = Brush.verticalGradient(listOf(Color(0x40FFFFFF), Color(0x14FFFFFF)))
 private val OrangeBrush = Brush.verticalGradient(listOf(Color(0xFFFFB347), Orange, Color(0xFFD96A00)))
 
 /** Only routes that already exist in the app are opened. New buttons are UI only for now. */
@@ -155,9 +157,7 @@ fun MainMenuScreen(api: GameApi, onOpen: (String) -> Unit) {
     ) {
         if (maxWidth >= maxHeight) {
             val k = minOf(maxWidth.value / REF_W, maxHeight.value / REF_H)
-            Box(Modifier.align(Alignment.Center)) {
-                MenuFrame(k, p.name, p.level, p.coins, p.diamonds, go)
-            }
+            MenuFrame(k, p.name, p.level, p.coins, p.diamonds, go)
         } else {
             PortraitMenu(maxWidth.value / 800f, p.name, p.level, p.coins, p.diamonds, go)
         }
@@ -174,7 +174,7 @@ private fun CurrencyPill(k: Float, modifier: Modifier, glyph: Glyph, value: Stri
         modifier
             .sized(k, 260f, 52f)
             .clip(shape)
-            .background(Navy)
+            .background(GlassBrush)
             .border((1.5f * k).dp, Line, shape)
             .padding(horizontal = (12 * k).dp),
         verticalAlignment = Alignment.CenterVertically
@@ -206,28 +206,22 @@ private fun TopIcon(k: Float, modifier: Modifier, glyph: Glyph, dot: Boolean = f
 
 @Composable
 private fun MenuFrame(k: Float, name: String, level: Int, coins: Int, diamonds: Int, go: (String) -> Unit) {
-    Box(Modifier.sized(k, REF_W, REF_H)) {
+    Box(Modifier.fillMaxSize()) {
         if (drawableId("menu_bg") != 0) {
-            ArtImage("menu_bg", Modifier.fillMaxSize(), ContentScale.FillBounds)
+            ArtImage("menu_bg", Modifier.fillMaxSize(), ContentScale.Crop)
         } else {
             Box(Modifier.fillMaxSize().background(NfBrush.Screen))
             CharacterSilhouette(Modifier.align(Alignment.Center).fillMaxHeight(0.8f).width((300 * k).dp))
         }
 
-        // ---------- top bar (full width, 76 high)
+        // ---------- top bar: simple glass strip across the whole width
         Box(
-            atTL(k, 0f, 0f)
-                .sized(k, REF_W, 76f)
-                .clip(CutCornerShape(bottomEnd = (46 * k).dp))
-                .background(Brush.horizontalGradient(listOf(Color(0xF2060A1E), Color(0xE60F1738))))
+            Modifier
+                .fillMaxWidth()
+                .height((76 * k).dp)
+                .background(Brush.horizontalGradient(listOf(Color(0xCC060A1E), Color(0x99101838))))
         )
-        Box(
-            atTL(k, 0f, 0f)
-                .sized(k, 378f, 76f)
-                .clip(CutCornerShape(bottomEnd = (22 * k).dp))
-                .background(Brush.horizontalGradient(listOf(Color(0xFF0E1A44), Color(0xFF1B2C74))))
-        )
-        Box(atTL(k, 0f, 74f).sized(k, 378f, 2f).background(Orange))
+        Box(atTL(k, 0f, 75f).fillMaxWidth().height((1 * k).dp).background(Line))
         Box(
             atTL(k, 14f, 5f)
                 .sized(k, 66f, 66f)
@@ -240,39 +234,38 @@ private fun MenuFrame(k: Float, name: String, level: Int, coins: Int, diamonds: 
             NfText("\u2605", size = fsz(k, 24f), color = NfColors.Gold)
         }
         NfText("Lv. $level", atTL(k, 96f, 44f), size = fsz(k, 22f), color = NfColors.TextDim)
-        GlyphIcon(Glyph.RANKBADGE, atTL(k, 290f, 8f).sized(k, 60f, 60f))
 
         CurrencyPill(k, atTL(k, 398f, 12f), Glyph.COIN, formatNum(coins))
         CurrencyPill(k, atTL(k, 676f, 12f), Glyph.GEM, formatNum(diamonds))
 
-        // six icons on one 88 px pitch, right aligned
-        GlyphIcon(Glyph.MEMBER, atTL(k, 1060f, 6f).sized(k, 70f, 70f))
-        TopIcon(k, atTL(k, 1156f, 11f), Glyph.GIFT, true) { go("gifts") }
-        TopIcon(k, atTL(k, 1244f, 11f), Glyph.PLAYERS) { go("friends") }
-        TopIcon(k, atTL(k, 1332f, 11f), Glyph.MAIL, true) { go("mail") }
-        TopIcon(k, atTL(k, 1420f, 11f), Glyph.GEAR) { go("settings") }
-        TopIcon(k, atTL(k, 1508f, 11f), Glyph.WIFI)
-        TopIcon(k, atTL(k, 1596f, 11f), Glyph.BATTERY)
+        // four icons, pinned to the right edge
+        Row(
+            edgeTR(k, 14f, 11f),
+            horizontalArrangement = Arrangement.spacedBy((34 * k).dp),
+            verticalAlignment = Alignment.CenterVertically
+        ) {
+            TopIcon(k, Modifier, Glyph.GIFT, true) { go("gifts") }
+            TopIcon(k, Modifier, Glyph.PLAYERS) { go("friends") }
+            TopIcon(k, Modifier, Glyph.MAIL, true) { go("mail") }
+            TopIcon(k, Modifier, Glyph.GEAR) { go("settings") }
+        }
 
-        // ---------- left: banner, equal menu rows, chat strip
+        // ---------- left: banner, equal glass menu rows, chat strip
         MenuBanner(k, atTL(k, ROW_X, 100f)) { go("battlepass") }
         entries.forEachIndexed { i, e ->
             MenuRow(k, e, atTL(k, ROW_X, ROW_Y + i * ROW_PITCH)) { go(e.route) }
         }
         ChatStrip(k, atTL(k, ROW_X, 788f))
 
-        // ---------- right: three equal tiles
-        GiftTile(k, atTL(k, 1218f, 90f)) { go("gifts") }
-        TopUpTile(k, atTL(k, 1368f, 90f))
-        Box(atTL(k, 1518f, 90f).sized(k, 140f, 170f)) {
-            ArtImage("art_booyah", Modifier.fillMaxSize())
-        }
+        // ---------- right: two small tiles, pinned to the right edge
+        GiftTile(k, atTR(k, 1448f, 90f, 104f)) { go("gifts") }
+        TopUpTile(k, atTR(k, 1558f, 90f, 104f))
 
         // ---------- right: mode card, ranked, box + START
-        BrCard(k, atTL(k, 1313f, 300f)) { go("play") }
-        RankedCard(k, atTL(k, 1237f, 706f), { go("play") }, { go("friends") })
-        MenuBox(k, atTL(k, 1214f, 809f))
-        StartButton(k, atTL(k, 1335f, 809f)) { go("play") }
+        BrCard(k, atTR(k, 1313f, 300f, 345f)) { go("play") }
+        RankedCard(k, atTR(k, 1237f, 706f, 420f), { go("play") }, { go("friends") })
+        MenuBox(k, atTR(k, 1214f, 809f, 106f))
+        StartButton(k, atTR(k, 1335f, 809f, 322f)) { go("play") }
 
         // ---------- bottom bar
         BottomBar(k, atTL(k, 14f, 857f).sized(k, 1074f, 58f), go)
@@ -394,7 +387,7 @@ private fun MenuRow(k: Float, e: MenuEntry, modifier: Modifier, onClick: () -> U
         modifier
             .sized(k, ROW_W, ROW_H)
             .clip(shape)
-            .background(Brush.horizontalGradient(listOf(Color(0xF20A0E22), Color(0xD00A0E22))))
+            .background(GlassBrush)
             .border((1.5f * k).dp, if (e.hot) Orange else Line, shape)
             .clickable { onClick() }
     ) {
@@ -431,7 +424,7 @@ private fun ChatStrip(k: Float, modifier: Modifier) {
         modifier
             .sized(k, 520f, 54f)
             .clip(shape)
-            .background(Navy)
+            .background(GlassBrush)
             .border((1.5f * k).dp, Line, shape)
             .padding(horizontal = (14 * k).dp),
         verticalAlignment = Alignment.CenterVertically
@@ -446,19 +439,19 @@ private fun ChatStrip(k: Float, modifier: Modifier) {
 private fun LabelChip(k: Float, modifier: Modifier, text: String, color: Color) {
     val shape = RoundedCornerShape((4 * k).dp)
     Box(
-        modifier.clip(shape).background(Navy).border((1.dp), Line, shape),
+        modifier.clip(shape).background(GlassBrush).border((1.dp), Line, shape),
         contentAlignment = Alignment.Center
-    ) { NfText(text, size = fsz(k, 19f), bold = true, color = color) }
+    ) { NfText(text, size = fsz(k, 15f), bold = true, color = color) }
 }
 
-/** Right side tiles share one size: 140 x 170. */
+/** Right side tiles share one small size: 104 x 128. */
 @Composable
 private fun GiftTile(k: Float, modifier: Modifier, onClick: () -> Unit) {
-    Box(modifier.sized(k, 140f, 170f).clickable { onClick() }) {
-        GlyphIcon(Glyph.GIFT, Modifier.align(Alignment.TopCenter).sized(k, 96f, 96f))
+    Box(modifier.sized(k, 104f, 128f).clickable { onClick() }) {
+        GlyphIcon(Glyph.GIFT, Modifier.align(Alignment.TopCenter).sized(k, 68f, 68f))
         LabelChip(
             k,
-            Modifier.align(Alignment.TopCenter).offset(0.dp, (104 * k).dp).sized(k, 128f, 30f),
+            Modifier.align(Alignment.TopCenter).offset(0.dp, (76 * k).dp).sized(k, 104f, 24f),
             "FREE GIFTS",
             Orange
         )
@@ -468,27 +461,27 @@ private fun GiftTile(k: Float, modifier: Modifier, onClick: () -> Unit) {
 @Composable
 private fun TopUpTile(k: Float, modifier: Modifier) {
     val shape = RoundedCornerShape((4 * k).dp)
-    Box(modifier.sized(k, 140f, 170f)) {
-        GlyphIcon(Glyph.CROWN, Modifier.align(Alignment.TopCenter).sized(k, 96f, 96f))
+    Box(modifier.sized(k, 104f, 128f)) {
+        GlyphIcon(Glyph.CROWN, Modifier.align(Alignment.TopCenter).sized(k, 68f, 68f))
         LabelChip(
             k,
-            Modifier.align(Alignment.TopCenter).offset(0.dp, (104 * k).dp).sized(k, 128f, 30f),
+            Modifier.align(Alignment.TopCenter).offset(0.dp, (76 * k).dp).sized(k, 104f, 24f),
             "TOP-UP",
             Color.White
         )
         Box(
             Modifier
                 .align(Alignment.TopCenter)
-                .offset(0.dp, (140 * k).dp)
-                .sized(k, 128f, 30f)
+                .offset(0.dp, (104 * k).dp)
+                .sized(k, 104f, 24f)
                 .clip(shape)
-                .background(Navy)
+                .background(GlassBrush)
                 .border((1.dp), Line, shape)
         ) {
             Row(Modifier.align(Alignment.Center), verticalAlignment = Alignment.CenterVertically) {
-                GlyphIcon(Glyph.CLOCK, Modifier.size((18 * k).dp))
-                Spacer(Modifier.width((6 * k).dp))
-                NfText("23:45:12", size = fsz(k, 19f), bold = true)
+                GlyphIcon(Glyph.CLOCK, Modifier.size((14 * k).dp))
+                Spacer(Modifier.width((5 * k).dp))
+                NfText("23:45:12", size = fsz(k, 15f), bold = true)
             }
         }
     }
@@ -501,7 +494,7 @@ private fun BrCard(k: Float, modifier: Modifier, onClick: () -> Unit) {
         modifier
             .sized(k, 345f, 255f)
             .clip(shape)
-            .background(Navy)
+            .background(GlassBrush)
             .border((1.5f * k).dp, Orange, shape)
             .clickable { onClick() }
     ) {
@@ -515,7 +508,7 @@ private fun BrCard(k: Float, modifier: Modifier, onClick: () -> Unit) {
                 .align(Alignment.BottomStart)
                 .fillMaxWidth()
                 .height((69 * k).dp)
-                .background(Color(0xF20B0F24))
+                .background(Color(0xB30B0F24))
         ) {
             Column(Modifier.align(Alignment.CenterStart).padding(start = (16 * k).dp)) {
                 NfText("BATTLE ROYALE", size = fsz(k, 27f), bold = true, color = Orange)
@@ -537,7 +530,7 @@ private fun RankedCard(k: Float, modifier: Modifier, onPlay: () -> Unit, onFrien
         modifier
             .sized(k, 420f, 91f)
             .clip(shape)
-            .background(Brush.horizontalGradient(listOf(Color(0xF20A0E22), Color(0xE6101838))))
+            .background(GlassBrush)
             .border((1.5f * k).dp, Color(0x6635B6FF), shape)
             .clickable { onPlay() }
     ) {
@@ -576,7 +569,7 @@ private fun MenuBox(k: Float, modifier: Modifier) {
         modifier
             .sized(k, 106f, 106f)
             .clip(shape)
-            .background(Navy)
+            .background(GlassBrush)
             .border((2 * k).dp, Orange, shape),
         contentAlignment = Alignment.Center
     ) { GlyphIcon(Glyph.CUBE, Modifier.sized(k, 72f, 72f)) }
@@ -626,7 +619,7 @@ private fun BottomBar(k: Float, modifier: Modifier, go: (String) -> Unit) {
     Row(
         modifier
             .clip(shape)
-            .background(Navy)
+            .background(GlassBrush)
             .border(1.dp, Line, shape),
         verticalAlignment = Alignment.CenterVertically
     ) {
