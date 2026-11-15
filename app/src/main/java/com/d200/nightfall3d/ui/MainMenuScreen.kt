@@ -96,7 +96,7 @@ private class BarItem(val glyph: Glyph, val label: String, val route: String)
 private val barItems = listOf(
     BarItem(Glyph.CROWN, "RANK", "rank"),
     BarItem(Glyph.GEAR, "SETTINGS", "settings"),
-    BarItem(Glyph.VAULT, "INVENTORY", "inventory"),
+    BarItem(Glyph.INVENTORY, "INVENTORY", "inventory"),
     BarItem(Glyph.PRESET, "PRESET", "preset"),
     BarItem(Glyph.LAB, "LAB", "lab")
 )
@@ -200,7 +200,7 @@ private fun MenuFrame(k: Float, name: String, level: Int, coins: Int, diamonds: 
             NfText("\u2605", size = fsz(k, 24f), color = NfColors.Gold)
         }
         NfText("Lv. $level", atTL(k, 96f, 44f), size = fsz(k, 22f), color = NfColors.TextDim)
-        GlyphIcon(Glyph.CROWN, atTL(k, 290f, 8f).sized(k, 60f, 60f))
+        GlyphIcon(Glyph.RANKBADGE, atTL(k, 290f, 8f).sized(k, 60f, 60f))
 
         CurrencyPill(k, atTL(k, 398f, 12f), Glyph.COIN, formatNum(coins))
         CurrencyPill(k, atTL(k, 676f, 12f), Glyph.GEM, formatNum(diamonds))
@@ -523,7 +523,7 @@ private fun RankedCard(k: Float, modifier: Modifier, onPlay: () -> Unit, onFrien
                 .background(Line)
         )
         GlyphIcon(
-            Glyph.CROWN,
+            Glyph.RANKBADGE,
             Modifier.align(Alignment.CenterEnd).padding(end = (22 * k).dp).sized(k, 70f, 70f)
         )
     }
@@ -539,7 +539,7 @@ private fun MenuBox(k: Float, modifier: Modifier) {
             .background(Navy)
             .border((2 * k).dp, Orange, shape),
         contentAlignment = Alignment.Center
-    ) { GlyphIcon(Glyph.VAULT, Modifier.sized(k, 72f, 72f)) } // was Glyph.CUBE (not defined)
+    ) { GlyphIcon(Glyph.CUBE, Modifier.sized(k, 72f, 72f)) }
 }
 
 @Composable
