@@ -17,10 +17,17 @@ import com.d200.nightfall3d.game.PlayType
 import com.d200.nightfall3d.ui.theme.*
 
 private fun cardColors(t: PlayType): Pair<Color, Color> = when (t) {
-    PlayType.ONLINE -> Pair(Color(0xFF2E6BD6), Color(0xFF0F1D4A))
-    PlayType.OFFLINE -> Pair(Color(0xFF4A5470), Color(0xFF141A2E))
-    PlayType.FRIENDS -> Pair(Color(0xFF7A3FD0), Color(0xFF1B1048))
-    PlayType.TRAINING -> Pair(Color(0xFFD0702E), Color(0xFF3A1A0F))
+    PlayType.ONLINE -> Pair(Color(0xFF3A86F0), Color(0xFF0A1440))
+    PlayType.OFFLINE -> Pair(Color(0xFF5A6684), Color(0xFF10162A))
+    PlayType.FRIENDS -> Pair(Color(0xFF9A52F0), Color(0xFF150C3E))
+    PlayType.TRAINING -> Pair(Color(0xFFE8803A), Color(0xFF35160B))
+}
+
+private fun cardIcon(t: PlayType): NfIconKind = when (t) {
+    PlayType.ONLINE -> NfIconKind.GLOBE
+    PlayType.OFFLINE -> NfIconKind.OFFLINE
+    PlayType.FRIENDS -> NfIconKind.GROUP
+    PlayType.TRAINING -> NfIconKind.TARGET
 }
 
 @Composable
@@ -37,7 +44,7 @@ fun PlayModeScreen(api: GameApi, onBack: () -> Unit, onOpen: (String) -> Unit) {
             NfText("Choose how you want to play", color = NfColors.TextDim)
             Row(
                 Modifier.fillMaxWidth().weight(1f),
-                horizontalArrangement = Arrangement.spacedBy(10.dp)
+                horizontalArrangement = Arrangement.spacedBy(12.dp)
             ) {
                 types.forEach { t ->
                     PlayCard(t, t == selected, Modifier.weight(1f).fillMaxHeight()) {
@@ -47,7 +54,13 @@ fun PlayModeScreen(api: GameApi, onBack: () -> Unit, onOpen: (String) -> Unit) {
                     }
                 }
             }
-            NfText("Go online for the best experience!", size = 12, color = NfColors.Cyan)
+            Row(
+                verticalAlignment = Alignment.CenterVertically,
+                horizontalArrangement = Arrangement.spacedBy(6.dp)
+            ) {
+                NfIcon(NfIconKind.GLOBE, Modifier.size(14.dp), NfColors.Cyan)
+                NfText("Go online for the best experience!", size = 12, color = NfColors.Cyan)
+            }
         }
     }
 }
@@ -56,24 +69,36 @@ fun PlayModeScreen(api: GameApi, onBack: () -> Unit, onOpen: (String) -> Unit) {
 private fun PlayCard(t: PlayType, selected: Boolean, modifier: Modifier, onClick: () -> Unit) {
     val colors = cardColors(t)
     NfPanel(modifier, selected = selected, onClick = onClick) {
-        ArtBlock(Modifier.fillMaxSize(), colors.first, colors.second, t.label.take(1))
+        ArtBlock(Modifier.fillMaxSize(), colors.first, colors.second)
+        // big faint icon as artwork placeholder
+        NfIcon(
+            cardIcon(t),
+            Modifier.align(Alignment.Center).offset(y = (-24).dp).size(86.dp),
+            Color(0x33FFFFFF)
+        )
         Box(
             Modifier
                 .align(Alignment.BottomCenter)
                 .fillMaxWidth()
-                .height(90.dp)
-                .background(Brush.verticalGradient(listOf(Color.Transparent, Color(0xEE0B0F24))))
+                .height(110.dp)
+                .background(Brush.verticalGradient(listOf(Color.Transparent, Color(0xF00A0E24))))
         )
         Column(
             Modifier.align(Alignment.BottomStart).padding(12.dp),
-            verticalArrangement = Arrangement.spacedBy(2.dp)
+            verticalArrangement = Arrangement.spacedBy(3.dp)
         ) {
-            NfText(
-                t.label.uppercase(),
-                size = 20,
-                bold = true,
-                color = if (selected) NfColors.Gold else NfColors.Text
-            )
+            Row(
+                verticalAlignment = Alignment.CenterVertically,
+                horizontalArrangement = Arrangement.spacedBy(8.dp)
+            ) {
+                NfIcon(cardIcon(t), Modifier.size(22.dp), if (selected) NfColors.Gold else NfColors.Text)
+                NfText(
+                    t.label.uppercase(),
+                    size = 20,
+                    bold = true,
+                    color = if (selected) NfColors.Gold else NfColors.Text
+                )
+            }
             NfText(t.tagline, size = 11, color = NfColors.TextDim)
         }
     }
