@@ -2,7 +2,7 @@ package com.d200.nightfall3d.game
 
 class FakeGameApi : GameApi {
     override var equippedWeaponId: String = "ak47"
-    override var selectedCharacterId: String = "ilona"
+    override var selectedCharacterId: String = "blue"
     override val match = MatchConfig()
     override val settings = GameSettings()
 
@@ -27,22 +27,12 @@ class FakeGameApi : GameApi {
             damage = 0.80f, range = 0.10f, accuracy = 1.00f, magazine = 1.00f)
     )
 
+    // Real characters only. The glbPath is a file in app/src/main/assets/.
+    // To add the next one: put its .glb in assets, add it to CHAR_FILES in Game3DView.kt, and add a line here.
     override fun characters() = listOf(
-        Character("ilona", "Ilona", "A fearless fighter with unmatched agility.",
+        Character("blue", "Blue", "Fast and balanced. The first fighter of the squad.",
             "Shadow Dash", "Dash forward and become invisible for a short time.",
-            0.60f, 0.85f, 0.70f, 0xFFE53950, "characters/ilona.glb"),
-        Character("nova", "Nova", "Calm sniper who rarely misses.",
-            "Eagle Eye", "Highlights enemies through walls for 3 seconds.",
-            0.50f, 0.60f, 0.90f, 0xFF35D3FF, "characters/nova.glb"),
-        Character("shade", "Shade", "Silent operator from the shadows.",
-            "Smoke Step", "Drops a smoke cloud and moves faster inside it.",
-            0.70f, 0.70f, 0.60f, 0xFF8B5CF6, "characters/shade.glb"),
-        Character("frost", "Frost", "Cold-blooded veteran.",
-            "Ice Wall", "Raises a barrier that blocks bullets for 5 seconds.",
-            0.90f, 0.50f, 0.60f, 0xFFB8C7FF, "characters/frost.glb"),
-        Character("ranger", "Ranger", "Scout who knows every arena.",
-            "Trap Set", "Places a trap that slows enemies.",
-            0.80f, 0.60f, 0.70f, 0xFFFF8A00, "characters/ranger.glb")
+            0.60f, 0.85f, 0.70f, 0xFF3B82F6, "char_blue.glb", level = 12, rank = "Silver")
     )
 
     override fun items() = listOf(
