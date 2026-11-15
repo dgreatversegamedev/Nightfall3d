@@ -42,30 +42,30 @@ import com.d200.nightfall3d.ui.theme.*
 // ------------------------------------------------------------------ layout helpers
 // If any of these already exist elsewhere in the package, delete the copy here.
 
-private const val REF_W = 1672f
-private const val REF_H = 941f
+const val REF_W = 1672f
+const val REF_H = 941f
 
 /** Size in reference pixels, scaled by k. */
-private fun Modifier.sized(k: Float, w: Float, h: Float): Modifier =
+fun Modifier.sized(k: Float, w: Float, h: Float): Modifier =
     this.size((w * k).dp, (h * k).dp)
 
 /** Position from the top-left corner in reference pixels, scaled by k. */
-private fun atTL(k: Float, x: Float, y: Float): Modifier =
+fun atTL(k: Float, x: Float, y: Float): Modifier =
     Modifier.offset((x * k).dp, (y * k).dp)
 
 /** Font size in reference pixels, scaled by k. */
-private fun fsz(k: Float, px: Float): Int = (px * k).toInt()
+fun fsz(k: Float, px: Float): Int = (px * k).toInt()
 
 /** Drawable resource id by name, 0 if the image is not in res/drawable. */
 @Composable
-private fun drawableId(name: String): Int {
+fun drawableId(name: String): Int {
     val ctx = LocalContext.current
     return ctx.resources.getIdentifier(name, "drawable", ctx.packageName)
 }
 
 /** Draws a drawable by name. Draws nothing if the image does not exist. */
 @Composable
-private fun ArtImage(name: String, modifier: Modifier = Modifier, contentScale: ContentScale = ContentScale.Fit) {
+fun ArtImage(name: String, modifier: Modifier = Modifier, contentScale: ContentScale = ContentScale.Fit) {
     val id = drawableId(name)
     if (id != 0) {
         Image(painterResource(id), null, modifier, contentScale = contentScale)
