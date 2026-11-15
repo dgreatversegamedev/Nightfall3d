@@ -1,7 +1,9 @@
 package com.d200.nightfall3d.ui
 
+import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
@@ -10,6 +12,8 @@ import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.clip
+import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.unit.dp
 import com.d200.nightfall3d.game.GameApi
 import com.d200.nightfall3d.game.Weapon
@@ -73,7 +77,15 @@ fun WeaponsScreen(api: GameApi, onBack: () -> Unit, onOpen: (String) -> Unit) {
                     ) {
                         NfText(sel.name, size = 24, bold = true)
                         NfText(sel.description, size = 12, color = NfColors.TextDim)
-                        GunSilhouette(Modifier.fillMaxWidth().height(90.dp))
+                        Box(
+                            Modifier
+                                .fillMaxWidth()
+                                .clip(RoundedCornerShape(10.dp))
+                                .background(Color(0x33000000))
+                                .padding(6.dp)
+                        ) {
+                            GunSilhouette(Modifier.fillMaxWidth().height(80.dp))
+                        }
                         StatBar("Damage", sel.damage, NfColors.Green)
                         StatBar("Range", sel.range, NfColors.Gold)
                         StatBar("Accuracy", sel.accuracy, NfColors.Cyan)
@@ -106,15 +118,28 @@ private fun WeaponCard(
 ) {
     NfPanel(modifier, selected = selected, onClick = onClick) {
         GunSilhouette(
-            Modifier.align(Alignment.Center).fillMaxWidth(0.8f).fillMaxHeight(0.5f)
+            Modifier.align(Alignment.Center).fillMaxWidth(0.8f).fillMaxHeight(0.5f),
+            if (w.locked) Color(0xFF626A94) else Color(0xFFC4CCF0)
         )
         NfText(
             w.category.uppercase(),
-            modifier = Modifier.align(Alignment.TopEnd).padding(6.dp),
+            modifier = Modifier.align(Alignment.TopStart).padding(6.dp),
             size = 9,
             color = NfColors.TextDim,
             bold = true
         )
+        when {
+            w.locked -> NfIcon(
+                NfIconKind.LOCK,
+                Modifier.align(Alignment.TopEnd).padding(6.dp).size(14.dp),
+                NfColors.Red
+            )
+            w.owned -> NfIcon(
+                NfIconKind.CHECK,
+                Modifier.align(Alignment.TopEnd).padding(6.dp).size(14.dp),
+                NfColors.Green
+            )
+        }
         Column(Modifier.align(Alignment.BottomStart).padding(8.dp)) {
             NfText(w.name, size = 12, bold = true)
             when {
