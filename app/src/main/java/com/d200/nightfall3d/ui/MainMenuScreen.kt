@@ -19,9 +19,7 @@ import androidx.compose.ui.geometry.Size
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.layout.ContentScale
-import androidx.compose.ui.unit.TextUnit
 import androidx.compose.ui.unit.dp
-import androidx.compose.ui.unit.sp
 import com.d200.nightfall3d.game.GameApi
 import com.d200.nightfall3d.ui.theme.*
 
@@ -53,7 +51,7 @@ private fun atTL(k: Float, x: Float, y: Float): Modifier =
     Modifier.offset((x * k).dp, (y * k).dp)
 
 /** Font size in reference pixels, scaled by k. */
-private fun fsz(k: Float, px: Float): TextUnit = (px * k).sp
+private fun fsz(k: Float, px: Float): Int = (px * k).toInt()
 
 private val Navy = Color(0xEB0A1230)
 private val Orange = Color(0xFFFF8A00)
@@ -98,7 +96,7 @@ private class BarItem(val glyph: Glyph, val label: String, val route: String)
 private val barItems = listOf(
     BarItem(Glyph.CROWN, "RANK", "rank"),
     BarItem(Glyph.GEAR, "SETTINGS", "settings"),
-    BarItem(Glyph.INVENTORY, "INVENTORY", "inventory"),
+    BarItem(Glyph.VAULT, "INVENTORY", "inventory"),
     BarItem(Glyph.PRESET, "PRESET", "preset"),
     BarItem(Glyph.LAB, "LAB", "lab")
 )
@@ -202,7 +200,7 @@ private fun MenuFrame(k: Float, name: String, level: Int, coins: Int, diamonds: 
             NfText("\u2605", size = fsz(k, 24f), color = NfColors.Gold)
         }
         NfText("Lv. $level", atTL(k, 96f, 44f), size = fsz(k, 22f), color = NfColors.TextDim)
-        GlyphIcon(Glyph.RANKBADGE, atTL(k, 290f, 8f).sized(k, 60f, 60f))
+        GlyphIcon(Glyph.CROWN, atTL(k, 290f, 8f).sized(k, 60f, 60f))
 
         CurrencyPill(k, atTL(k, 398f, 12f), Glyph.COIN, formatNum(coins))
         CurrencyPill(k, atTL(k, 676f, 12f), Glyph.GEM, formatNum(diamonds))
@@ -525,7 +523,7 @@ private fun RankedCard(k: Float, modifier: Modifier, onPlay: () -> Unit, onFrien
                 .background(Line)
         )
         GlyphIcon(
-            Glyph.RANKBADGE,
+            Glyph.CROWN,
             Modifier.align(Alignment.CenterEnd).padding(end = (22 * k).dp).sized(k, 70f, 70f)
         )
     }
@@ -541,7 +539,7 @@ private fun MenuBox(k: Float, modifier: Modifier) {
             .background(Navy)
             .border((2 * k).dp, Orange, shape),
         contentAlignment = Alignment.Center
-    ) { GlyphIcon(Glyph.INVENTORY, Modifier.sized(k, 72f, 72f)) } // was Glyph.CUBE (not defined)
+    ) { GlyphIcon(Glyph.VAULT, Modifier.sized(k, 72f, 72f)) } // was Glyph.CUBE (not defined)
 }
 
 @Composable
