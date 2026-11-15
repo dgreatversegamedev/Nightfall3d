@@ -1,5 +1,6 @@
 package com.d200.nightfall3d.ui
 
+import androidx.compose.foundation.Image
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
@@ -19,6 +20,8 @@ import androidx.compose.ui.geometry.Size
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.layout.ContentScale
+import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.unit.dp
 import com.d200.nightfall3d.game.GameApi
 import com.d200.nightfall3d.ui.theme.*
@@ -52,6 +55,22 @@ private fun atTL(k: Float, x: Float, y: Float): Modifier =
 
 /** Font size in reference pixels, scaled by k. */
 private fun fsz(k: Float, px: Float): Int = (px * k).toInt()
+
+/** Drawable resource id by name, 0 if the image is not in res/drawable. */
+@Composable
+private fun drawableId(name: String): Int {
+    val ctx = LocalContext.current
+    return ctx.resources.getIdentifier(name, "drawable", ctx.packageName)
+}
+
+/** Draws a drawable by name. Draws nothing if the image does not exist. */
+@Composable
+private fun ArtImage(name: String, modifier: Modifier = Modifier, contentScale: ContentScale = ContentScale.Fit) {
+    val id = drawableId(name)
+    if (id != 0) {
+        Image(painterResource(id), null, modifier, contentScale = contentScale)
+    }
+}
 
 private val Navy = Color(0xEB0A1230)
 private val Orange = Color(0xFFFF8A00)
