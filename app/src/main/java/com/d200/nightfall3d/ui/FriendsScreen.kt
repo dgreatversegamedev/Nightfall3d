@@ -1,6 +1,7 @@
 package com.d200.nightfall3d.ui
 
 import androidx.compose.foundation.background
+import androidx.compose.foundation.border
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.CircleShape
@@ -109,13 +110,14 @@ private fun FriendRow(f: Friend, onInvite: () -> Unit) {
         Modifier
             .fillMaxWidth()
             .clip(RoundedCornerShape(10.dp))
-            .background(Color(0x33000000))
+            .background(NfBrush.Row)
+            .border(1.dp, Color(0x1AFFFFFF), RoundedCornerShape(10.dp))
             .padding(8.dp),
         verticalAlignment = Alignment.CenterVertically,
         horizontalArrangement = Arrangement.spacedBy(10.dp)
     ) {
         Box(
-            Modifier.size(34.dp).clip(CircleShape).background(NfColors.Purple),
+            Modifier.size(36.dp).clip(CircleShape).background(NfBrush.Violet),
             contentAlignment = Alignment.Center
         ) {
             NfText(f.name.take(1), bold = true)
@@ -123,7 +125,7 @@ private fun FriendRow(f: Friend, onInvite: () -> Unit) {
         Column(Modifier.weight(1f)) {
             NfText(f.name, bold = true)
             NfText(
-                f.status,
+                "● " + f.status,
                 size = 11,
                 color = if (f.status == "Online") NfColors.Green else NfColors.Cyan
             )
