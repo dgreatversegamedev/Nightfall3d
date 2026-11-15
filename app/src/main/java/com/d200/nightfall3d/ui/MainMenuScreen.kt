@@ -53,6 +53,27 @@ fun Modifier.sized(k: Float, w: Float, h: Float): Modifier =
 fun atTL(k: Float, x: Float, y: Float): Modifier =
     Modifier.offset((x * k).dp, (y * k).dp)
 
+/*
+ * Corner anchors used by HudScreen. Values are reference pixels (x, y = top-left of the item
+ * in the 1672 x 941 reference image, w / h = its size). They work inside a Box.
+ */
+
+/** Top right, by distance from the right edge (x) and from the top (y). */
+fun BoxScope.edgeTR(k: Float, x: Float, y: Float): Modifier =
+    Modifier.align(Alignment.TopEnd).offset((-x * k).dp, (y * k).dp)
+
+fun BoxScope.atTR(k: Float, x: Float, y: Float, w: Float): Modifier =
+    Modifier.align(Alignment.TopEnd).offset((-(REF_W - x - w) * k).dp, (y * k).dp)
+
+fun BoxScope.atBL(k: Float, x: Float, y: Float, h: Float): Modifier =
+    Modifier.align(Alignment.BottomStart).offset((x * k).dp, (-(REF_H - y - h) * k).dp)
+
+fun BoxScope.atBR(k: Float, x: Float, y: Float, w: Float, h: Float): Modifier =
+    Modifier.align(Alignment.BottomEnd).offset((-(REF_W - x - w) * k).dp, (-(REF_H - y - h) * k).dp)
+
+fun BoxScope.atBC(k: Float, x: Float, y: Float, w: Float, h: Float): Modifier =
+    Modifier.align(Alignment.BottomCenter).offset(((x + w / 2f - REF_W / 2f) * k).dp, (-(REF_H - y - h) * k).dp)
+
 /** Font size in reference pixels, scaled by k. */
 fun fsz(k: Float, px: Float): Int = (px * k).toInt()
 
