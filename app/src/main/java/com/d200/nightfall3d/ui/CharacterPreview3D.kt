@@ -44,6 +44,11 @@ private const val PREVIEW_CAM_Y = 0.95f      // camera height
 private const val PREVIEW_LOOK_Y = 0.9f      // height of the point the camera looks at
 private val PREVIEW_BG = Color(0xFF1A0F4A)   // same purple as the middle of the menu background
 
+// The camera above is back to the original. Only the character is moved:
+// this lifts him up in the box. Bigger = he moves UP, smaller = he moves DOWN.
+// 0f = original position.
+private const val MODEL_LIFT = 1.8f
+
 /** The character the player picked. The Character screen sets it, the main menu shows it. */
 object SelectedCharacter {
     var glb by mutableStateOf("char_blue.glb")
@@ -110,6 +115,7 @@ fun CharacterPreview3D(glb: String, modifier: Modifier = Modifier) {
                 cameraNode.lookAt(Position(0f, PREVIEW_LOOK_Y, 0f))
                 val m = state.model
                 if (m != null) {
+                    m.position = Position(0f, MODEL_LIFT, 0f)
                     m.rotation = Rotation(y = state.yaw)
                     val a = m.modelInstance.animator
                     if (a.animationCount > 0) {
