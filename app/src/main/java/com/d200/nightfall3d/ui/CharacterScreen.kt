@@ -1,6 +1,9 @@
 package com.d200.nightfall3d.ui
 
+import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.*
+import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.ui.draw.clip
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.runtime.Composable
@@ -59,14 +62,22 @@ fun CharacterScreen(api: GameApi, onBack: () -> Unit) {
                     Modifier.fillMaxSize().padding(14.dp),
                     verticalArrangement = Arrangement.spacedBy(8.dp)
                 ) {
-                    NfText(sel.name, size = 26, bold = true)
+                    Row(verticalAlignment = Alignment.CenterVertically) {
+                        NfText(sel.name, size = 26, bold = true, modifier = Modifier.weight(1f))
+                        NfIcon(NfIconKind.SHIELD, Modifier.size(22.dp), NfColors.Purple)
+                    }
                     NfText(sel.tagline, size = 12, color = NfColors.TextDim)
                     StatBar("Health", sel.health, NfColors.Green)
                     StatBar("Speed", sel.speed, NfColors.Gold)
                     StatBar("Damage", sel.damage, NfColors.Red)
-                    NfSectionTitle("SKILL")
-                    NfText(sel.skillName, size = 15, bold = true)
-                    NfText(sel.skillText, size = 12, color = NfColors.TextDim)
+                    Column(
+                        Modifier.fillMaxWidth().clip(RoundedCornerShape(10.dp)).background(Color(0x33000000)).padding(10.dp),
+                        verticalArrangement = Arrangement.spacedBy(4.dp)
+                    ) {
+                        NfSectionTitle("SKILL")
+                        NfText(sel.skillName, size = 15, bold = true, color = NfColors.Gold)
+                        NfText(sel.skillText, size = 12, color = NfColors.TextDim)
+                    }
                     Spacer(Modifier.weight(1f))
                     NfButton(
                         if (chosenId == sel.id) "SELECTED" else "SELECT",
