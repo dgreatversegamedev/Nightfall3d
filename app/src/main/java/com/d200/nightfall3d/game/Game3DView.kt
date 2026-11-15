@@ -81,6 +81,7 @@ import kotlin.math.hypot
 import kotlin.math.min
 import kotlin.math.roundToInt
 import kotlin.math.sin
+import kotlin.math.sqrt
 
 // =====================================================================
 // Game3DView.kt  -  the 3D ENGINE (no buttons in here).
@@ -141,6 +142,15 @@ private const val RIGHT_HAND_JOINT = 14          // position of the right hand i
 private const val PUNCH_LEN = 0.5f            // length of punch_1 / punch_2 / punch_3
 private const val PUNCH_CHAIN_AT = 0.3f       // a new tap after this many seconds starts the next punch
 private const val JUMP_CLIP = "jump_inplace"
+// ---- Crouch (bend down): the character has no crouch clip, so the deepest squat of the jump clip is held ----
+private const val CROUCH_POSE_T = 0.40f       // moment of "jump_inplace" used as the squat. Try 0.0667 for the other squat.
+private const val CROUCH_SPEED = 1.2f         // walking speed while crouched (normal walk is WALK_SPEED)
+
+// ---- Shield: a ring-cage bubble around him ----
+private const val SHIELD_RINGS = 4
+private const val SHIELD_SEGS = 16
+private const val SHIELD_R = 1.15f            // bubble radius (meters)
+private const val SHIELD_CY = 0.95f           // bubble centre height
 private const val JUMP_LEN = 0.5f
 private const val JUMP_TAKEOFF_T = 0.1406f    // clip time when the feet leave the ground
 private const val JUMP_LAND_T = 0.3594f       // clip time when the feet touch down again
@@ -232,6 +242,8 @@ internal class GameInput {
     var aimX = 0f            // fire stick direction (only used while shooting)
     var aimY = 0f
     var paused = false
+    var crouch = false        // bent down (HUD crouch button)
+    var shieldOn = false      // shield bubble is up (HUD shield button)
     var handMode = false      // fists mode: gun hidden, no shooting, punch button active
     var gunWanted by mutableIntStateOf(0)   // which gun the HUD wants in the hand (index in GUNS)
     var zoom = 1f
@@ -332,9 +344,19 @@ internal fun Game3DView(
         }
     }
 
+    // Shield: thin glowing rings around him (hidden until the shield button is on)
+    val shieldNodes = remember {
+        val mat = materialLoader.createColorInstance(Color(0xFF35D3FF))
+        List(SHIELD_RINGS * SHIELD_SEGS) {
+            CubeNode(engine, size = Float3(0.05f, 0.05f, 0.38f), materialInstance = mat)
+                .apply { isVisible = false }
+        }
+    }
+
     val nodes = rememberNodes {
         add(gun)
         addAll(bullets)
+        addAll(shieldNodes)
     }
 
     // 1) arena, 2) character. One step at a time so nothing freezes.
@@ -408,7 +430,7 @@ internal fun Game3DView(
             cameraNode = cameraNode,
             childNodes = nodes,
             environment = environment,
-            onFrame = { nanos -> stepGame(nanos, rig, models, cameraNode, engine, gun, bullets) }
+            onFrame = { nanos -> stepGame(nanos, rig, models, cameraNode, engine, gun, bullets, shieldNodes) }
         )
 
         // Whole-screen touch layer UNDER the HUD buttons: one finger drag = turn camera, two fingers = zoom/twist
@@ -468,7 +490,8 @@ private fun stepGame(
     cameraNode: io.github.sceneview.node.CameraNode,
     engine: Engine,
     gun: Node,
-    bullets: List<CubeNode>
+    bullets: List<CubeNode>,
+    shieldNodes: List<CubeNode>
 ) {
     // Paused: freeze everything (the camera stays where it is)
     if (rig.paused) { rig.lastNanos = nanos; return }
@@ -552,7 +575,7 @@ private fun stepGame(
 
     // Speed eases up and down (no instant jump between stand / walk / run)
     // (the low punch roots him to the spot)
-    val targetSpeed = if (!moving || rig.punchClip == "punch_3") 0f else if (rig.runMode) RUN_SPEED else WALK_SPEED
+    val targetSpeed = if (!moving || rig.punchClip == "punch_3") 0f else if (rig.crouch) CROUCH_SPEED else if (rig.runMode) RUN_SPEED else WALK_SPEED
     val maxChange = ACCEL * dt
     rig.speed += (targetSpeed - rig.speed).coerceIn(-maxChange, maxChange)
 
@@ -606,10 +629,11 @@ private fun stepGame(
     val want = when {
         rig.jumpState != 0 -> JUMP_CLIP
         rig.punchClip.isNotEmpty() -> rig.punchClip
+        rig.crouch -> JUMP_CLIP          // bent down: hold the squat pose
         else -> shootWant
     }
     // jump and punch are played at an exact moment of the clip (not by the clock)
-    val forceTime = if (rig.jumpState != 0) rig.jumpClipT else if (rig.punchClip.isNotEmpty()) rig.punchT else -1f
+    val forceTime = if (rig.jumpState != 0) rig.jumpClipT else if (rig.punchClip.isNotEmpty()) rig.punchT else if (rig.crouch) CROUCH_POSE_T else -1f
     // punch_1 / punch_2 only move the upper body, so the legs keep walking/running underneath
     val layerBase = if (want == "punch_1" || want == "punch_2") base else ""
 
@@ -660,6 +684,7 @@ private fun stepGame(
         }
     }
     updateBullets(dt, rig, bullets, sx, sz)
+    updateShield(rig, shieldNodes, nanos)
 
     // Chest-level follow camera (distance = pinch zoom, direction = drag)
     val dist = CAM_DIST * rig.zoom
@@ -740,6 +765,32 @@ private fun driveAnimation(
         animator.applyCrossFade(st.prev, st.prevTime, if (BLEND_FLIP) 1f - st.fade else st.fade)
     }
     animator.updateBoneMatrices()
+}
+
+// ---------------- Shield ----------------
+
+private fun updateShield(rig: GameInput, nodes: List<CubeNode>, nanos: Long) {
+    if (!rig.shieldOn) {
+        for (n in nodes) if (n.isVisible) n.isVisible = false
+        return
+    }
+    val t = nanos / 1_000_000_000f
+    val pulse = 1f + 0.03f * sin(t * 6f)
+    val baseY = rig.y + rig.jumpH
+    var i = 0
+    for (ring in 0 until SHIELD_RINGS) {
+        val dy = SHIELD_R * (-0.7f + ring * (1.4f / (SHIELD_RINGS - 1)))
+        val r = sqrt(SHIELD_R * SHIELD_R - dy * dy) * pulse
+        val spin = t * 40f * (if (ring % 2 == 0) 1f else -1f)      // rings turn slowly (degrees)
+        for (s in 0 until SHIELD_SEGS) {
+            val deg = spin + s * 360f / SHIELD_SEGS
+            val rad = deg * DEG_TO_RAD
+            val n = nodes[i++]
+            n.position = Position(rig.x + r * cos(rad), baseY + SHIELD_CY + dy, rig.z + r * sin(rad))
+            n.rotation = Rotation(y = -deg)
+            n.isVisible = true
+        }
+    }
 }
 
 // ---------------- Bullets ----------------
