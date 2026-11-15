@@ -79,8 +79,9 @@ fun SettingsScreen(api: GameApi, onBack: () -> Unit) {
                     { i -> tab = i },
                     Modifier.width(150.dp).fillMaxHeight()
                 )
+                NfPanel(Modifier.weight(1f).fillMaxHeight()) {
                 Column(
-                    Modifier.weight(1f).fillMaxHeight().verticalScroll(rememberScrollState()),
+                    Modifier.fillMaxSize().padding(10.dp).verticalScroll(rememberScrollState()),
                     verticalArrangement = Arrangement.spacedBy(6.dp)
                 ) {
                     tabs[tab].second.forEach { o ->
@@ -94,6 +95,7 @@ fun SettingsScreen(api: GameApi, onBack: () -> Unit) {
                             }
                         }
                     }
+                }
                 }
             }
             Row(
