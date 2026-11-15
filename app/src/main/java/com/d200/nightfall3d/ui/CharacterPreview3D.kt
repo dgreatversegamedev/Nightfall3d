@@ -17,7 +17,6 @@ import androidx.compose.ui.input.pointer.pointerInput
 import com.d200.nightfall3d.ui.theme.NfColors
 import com.google.android.filament.IndirectLight
 import io.github.sceneview.Scene
-import io.github.sceneview.SurfaceType
 import io.github.sceneview.environment.Environment
 import io.github.sceneview.math.Position
 import io.github.sceneview.math.Rotation
@@ -98,7 +97,6 @@ fun CharacterPreview3D(glb: String, modifier: Modifier = Modifier) {
     Box(modifier) {
         Scene(
             modifier = Modifier.fillMaxSize(),
-            surfaceType = SurfaceType.TextureSurface,   // lets the menu show through
             isOpaque = false,                           // transparent background
             engine = engine,
             modelLoader = modelLoader,
