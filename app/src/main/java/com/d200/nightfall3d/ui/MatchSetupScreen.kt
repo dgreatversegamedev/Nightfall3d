@@ -4,6 +4,7 @@ import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.*
+import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
@@ -34,7 +35,15 @@ fun MatchSetupScreen(api: GameApi, onBack: () -> Unit, onOpen: (String) -> Unit)
     NfScreen(
         "MATCH SETUP",
         onBack,
-        actions = { NfText("Players 4/16", size = 13, color = NfColors.TextDim) }
+        actions = {
+            Row(
+                verticalAlignment = Alignment.CenterVertically,
+                horizontalArrangement = Arrangement.spacedBy(6.dp)
+            ) {
+                NfIcon(NfIconKind.GROUP, Modifier.size(18.dp), NfColors.TextDim)
+                NfText("4/16", size = 13, color = NfColors.TextDim)
+            }
+        }
     ) {
         Row(Modifier.fillMaxSize(), horizontalArrangement = Arrangement.spacedBy(12.dp)) {
 
@@ -44,6 +53,7 @@ fun MatchSetupScreen(api: GameApi, onBack: () -> Unit, onOpen: (String) -> Unit)
                 verticalArrangement = Arrangement.spacedBy(8.dp)
             ) {
                 Selector(
+                    NfIconKind.TARGET,
                     "MODE",
                     modes[modeIdx].label,
                     modes[modeIdx].tagline,
@@ -57,6 +67,7 @@ fun MatchSetupScreen(api: GameApi, onBack: () -> Unit, onOpen: (String) -> Unit)
                     }
                 )
                 Selector(
+                    NfIconKind.GLOBE,
                     "MAP",
                     arenas[arenaIdx],
                     "Tap the arrows to change",
@@ -148,7 +159,7 @@ private fun ArrowBox(text: String, onClick: () -> Unit) {
             .size(34.dp)
             .clip(shape)
             .background(Color(0x33FFFFFF))
-            .border(1.dp, NfColors.Border, shape)
+            .border(1.dp, NfBrush.Glow, shape)
             .clickable { onClick() },
         contentAlignment = Alignment.Center
     ) {
@@ -158,6 +169,7 @@ private fun ArrowBox(text: String, onClick: () -> Unit) {
 
 @Composable
 private fun Selector(
+    icon: NfIconKind,
     title: String,
     value: String,
     hint: String,
@@ -171,6 +183,10 @@ private fun Selector(
             horizontalArrangement = Arrangement.spacedBy(10.dp)
         ) {
             ArrowBox("<", onPrev)
+            Box(
+                Modifier.size(38.dp).clip(CircleShape).background(Color(0x33FFFFFF)),
+                contentAlignment = Alignment.Center
+            ) { NfIcon(icon, Modifier.size(22.dp), NfColors.Text) }
             Column(Modifier.weight(1f), horizontalAlignment = Alignment.CenterHorizontally) {
                 NfText(title, size = 11, color = NfColors.Cyan, bold = true)
                 NfText(value, size = 16, bold = true, align = TextAlign.Center)
