@@ -34,6 +34,10 @@ import androidx.compose.ui.unit.IntOffset
 import androidx.compose.ui.unit.dp
 import com.d200.nightfall3d.game.GameApi
 import com.d200.nightfall3d.game.GameInput
+import com.d200.nightfall3d.game.GameMode
+import com.d200.nightfall3d.game.MatchSettings
+import com.d200.nightfall3d.game.MatchState
+import com.d200.nightfall3d.game.PLAYER_MAX_HP
 import com.d200.nightfall3d.game.CHAR_FILES
 import com.d200.nightfall3d.game.Game3DView
 import com.d200.nightfall3d.game.gunNames
@@ -50,6 +54,14 @@ import kotlin.math.roundToInt
 //   jump        -> jump
 //   Switch (round button beside the fire ring) -> gun mode or hand mode (fists: gun hidden, only punch / jump / crouch)
 //   weapon list -> which gun is in the hand
+//
+// DEATHMATCH / TEAM DEATHMATCH (new)
+//   When the mode picked on Match Setup is Deathmatch or Team Deathmatch, a MatchState (MatchLogic.kt) is made here
+//   and handed to the 3D game through input.match. The HUD then shows:
+//     top centre   scoreboard (top 3 in Deathmatch, team scores in Team Deathmatch) + clock + kill feed
+//     top right    players in the match, your kills
+//     bottom       your real health
+//     centre       ELIMINATED + respawn countdown, and the MATCH OVER screen
 //
 // One size system, so nothing looks random:
 //   BIG   112  shield, jump, crouch, prone, sprint
@@ -253,6 +265,45 @@ private fun CountBadge(k: Float, modifier: Modifier, text: String) {
     ) { NfText(text, size = fsz(k, 22f), bold = true, align = TextAlign.Center) }
 }
 
+/** Deathmatch: top 3 players. Team Deathmatch: your team vs the enemy team. Plus the match clock. */
+@Composable
+private fun ScoreBoard(k: Float, modifier: Modifier, mt: MatchState) {
+    val shape = RoundedCornerShape((6 * k).dp)
+    val t = mt.timeSec
+    val clock = "${t / 60}:${(t % 60).toString().padStart(2, '0')}"
+    Column(
+        modifier
+            .clip(shape)
+            .background(Glass)
+            .border((1.5f * k).dp, Color(0x44FFFFFF), shape)
+            .padding(horizontal = (12 * k).dp, vertical = (6 * k).dp),
+        verticalArrangement = Arrangement.spacedBy((2 * k).dp)
+    ) {
+        Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
+            NfText(mt.mode.label.uppercase(), size = fsz(k, 20f), color = NfColors.Cyan, bold = true)
+            NfText(clock, size = fsz(k, 22f), bold = true)
+        }
+        if (mt.teamMode) {
+            Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
+                NfText("YOUR TEAM  ${mt.teamA}", size = fsz(k, 26f), bold = true, color = Color(0xFF35E07A))
+                NfText("${mt.teamB}  ENEMY TEAM", size = fsz(k, 26f), bold = true, color = Color(0xFFFF5A5A))
+            }
+        } else {
+            mt.rows().take(3).forEachIndexed { i, r ->
+                Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
+                    NfText(
+                        "${i + 1}. ${r.name}",
+                        size = fsz(k, 22f),
+                        bold = r.isYou,
+                        color = if (r.isYou) NfColors.Gold else NfColors.Text
+                    )
+                    NfText("${r.kills}", size = fsz(k, 22f), bold = true, color = if (r.isYou) NfColors.Gold else NfColors.Text)
+                }
+            }
+        }
+    }
+}
+
 @Composable
 fun HudScreen(api: GameApi, onExit: () -> Unit) {
     val p = api.profile()
@@ -265,8 +316,19 @@ fun HudScreen(api: GameApi, onExit: () -> Unit) {
     val gunList = remember { GunLoadout.names(allGuns) }
     val startGun = remember { gunList.indexOf(api.equippedWeaponId).let { if (it < 0) 0 else it } }
 
+    // Deathmatch / Team Deathmatch: the match with the bots. null for every other mode (just you, like before).
+    val matchOn = api.match.mode == GameMode.DEATHMATCH || api.match.mode == GameMode.TEAM_DEATHMATCH
+    val match = remember {
+        if (matchOn) MatchState(api.match.mode, MatchSettings.botCount, api.match.timeLimit) else null
+    }
+
     // The one object the 3D game reads. The buttons below write into it.
-    val input = remember { GameInput().also { it.gunWanted = allGuns.indexOf(gunList[startGun]).coerceAtLeast(0) } }
+    val input = remember {
+        GameInput().also {
+            it.gunWanted = allGuns.indexOf(gunList[startGun]).coerceAtLeast(0)
+            it.match = match
+        }
+    }
     // the character picked on the Character screen (blue is the only real one for now)
     val pickedGlb = api.characters().firstOrNull { it.id == api.selectedCharacterId }?.glbPath ?: "char_blue.glb"
     val charIndex = CHAR_FILES.indexOf(pickedGlb).let { if (it < 0) 0 else it }
@@ -300,10 +362,9 @@ fun HudScreen(api: GameApi, onExit: () -> Unit) {
     val selected = if (handMode) meleeIdx + 1 else gunIdx
     val currentName = options.getOrNull(selected) ?: "No weapon"
 
-    // Players who have joined this match. Offline test = only you. It will count real players later.
-    val playersJoined = 1
-
-    // The squad list is not shown here. It will appear when real players are in the match.
+    // Players in this match: you + the bots. Without a match it is only you.
+    val playersJoined = if (match != null) match.bots.size + 1 else 1
+    val hp = match?.playerHp ?: PLAYER_MAX_HP
 
     BoxWithConstraints(
         Modifier
@@ -363,6 +424,22 @@ fun HudScreen(api: GameApi, onExit: () -> Unit) {
             GlyphButton(k, atTL(k, 343f, 84f), TOP, Glyph.EMOJI, 0.52f)
             GlyphButton(k, atTL(k, 260f, 161f), TOP, Glyph.CHAT, 0.52f)
 
+            // ---------------- top centre: scoreboard + kill feed (Deathmatch / Team Deathmatch only)
+            if (match != null) {
+                ScoreBoard(k, atTL(k, 620f, 10f).width((430 * k).dp), match)
+                val feedText = match.feed
+                if (feedText.isNotEmpty()) {
+                    NfText(
+                        feedText,
+                        size = fsz(k, 24f),
+                        bold = true,
+                        color = Color(0xFFFFE066),
+                        modifier = atTL(k, 620f, 160f).width((430 * k).dp),
+                        align = TextAlign.Center
+                    )
+                }
+            }
+
             // ---------------- top right: players joined, kills, settings
             // All boxes use the same dark glass. Only the small icon carries colour.
             val infoShape = RoundedCornerShape((5 * k).dp)
@@ -390,7 +467,7 @@ fun HudScreen(api: GameApi, onExit: () -> Unit) {
             ) {
                 GlyphIcon(Glyph.SKULL, Modifier.sized(k, 32f, 32f), main = Color(0xFFE5483C))
                 Spacer(Modifier.width((10 * k).dp))
-                NfText("4", size = fsz(k, 27f), bold = true)
+                NfText(if (match != null) "${match.myKills()}" else "4", size = fsz(k, 27f), bold = true)
             }
             // settings gear: leaves the match
             GlyphIcon(
@@ -510,12 +587,12 @@ fun HudScreen(api: GameApi, onExit: () -> Unit) {
                 }
             }
 
-            // ---------------- bottom centre: armor + health bar
+            // ---------------- bottom centre: health bar (real health in a match)
             Row(
                 atBC(k, 415f, 868f, 645f, 46f).sized(k, 645f, 46f),
                 verticalAlignment = Alignment.CenterVertically
             ) {
-                NfText("HP 200/200", size = fsz(k, 24f), bold = true)
+                NfText("HP $hp/$PLAYER_MAX_HP", size = fsz(k, 24f), bold = true)
                 Spacer(Modifier.width((16 * k).dp))
                 Box(
                     Modifier
@@ -525,10 +602,12 @@ fun HudScreen(api: GameApi, onExit: () -> Unit) {
                         .background(Color(0x66000000))
                         .border((1.dp), Color(0x55FFFFFF), RoundedCornerShape((7 * k).dp))
                 ) {
+                    val frac = (hp.toFloat() / PLAYER_MAX_HP).coerceIn(0f, 1f)
                     Box(
                         Modifier
-                            .fillMaxSize()
-                            .background(Color(0xFFF4F6FA))
+                            .fillMaxHeight()
+                            .fillMaxWidth(frac)
+                            .background(if (frac < 0.3f) Color(0xFFFF5A5A) else Color(0xFFF4F6FA))
                     )
                 }
             }
@@ -570,6 +649,43 @@ fun HudScreen(api: GameApi, onExit: () -> Unit) {
                                 NfText(name, size = fsz(k, 22f), bold = true, maxLines = 1)
                             }
                         }
+                    }
+                }
+            }
+
+            // ---------------- eliminated: respawn countdown
+            if (match != null && match.playerDead && !match.over) {
+                Column(
+                    Modifier.align(Alignment.Center),
+                    horizontalAlignment = Alignment.CenterHorizontally,
+                    verticalArrangement = Arrangement.spacedBy((6 * k).dp)
+                ) {
+                    NfText("ELIMINATED", size = fsz(k, 60f), bold = true, color = Color(0xFFFF5A5A))
+                    NfText("Respawning in ${match.respawnSec}", size = fsz(k, 30f), bold = true)
+                }
+            }
+
+            // ---------------- match over (on top of everything)
+            if (match != null && match.over) {
+                Box(
+                    Modifier
+                        .fillMaxSize()
+                        .background(Color(0xCC000000))
+                        .clickable { },
+                    contentAlignment = Alignment.Center
+                ) {
+                    Column(
+                        horizontalAlignment = Alignment.CenterHorizontally,
+                        verticalArrangement = Arrangement.spacedBy(12.dp)
+                    ) {
+                        NfText("MATCH OVER", size = fsz(k, 34f), color = NfColors.TextDim, bold = true)
+                        NfText(match.resultText, size = fsz(k, 64f), bold = true, color = NfColors.Gold)
+                        NfText(
+                            "Your kills ${match.myKills()}    Deaths ${match.deaths[0]}",
+                            size = fsz(k, 28f),
+                            bold = true
+                        )
+                        NfButton("BACK TO MENU", primary = true) { onExit() }
                     }
                 }
             }
