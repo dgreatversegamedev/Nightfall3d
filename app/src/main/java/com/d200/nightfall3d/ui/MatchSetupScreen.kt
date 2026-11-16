@@ -19,6 +19,7 @@ import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
 import com.d200.nightfall3d.game.GameApi
 import com.d200.nightfall3d.game.GameMode
+import com.d200.nightfall3d.game.MatchSettings
 import com.d200.nightfall3d.ui.theme.*
 
 @Composable
@@ -31,6 +32,10 @@ fun MatchSetupScreen(api: GameApi, onBack: () -> Unit, onOpen: (String) -> Unit)
     var autoPickup by remember { mutableStateOf(api.match.autoPickup) }
     var weaponLimit by remember { mutableStateOf(api.match.weaponLimit) }
     var time by remember { mutableStateOf(api.match.timeLimit) }
+    // number of bots in the match (Deathmatch / Team Deathmatch test)
+    var bots by remember { mutableStateOf(MatchSettings.botCount.coerceIn(1, MatchSettings.MAX_BOTS)) }
+
+    val botMode = modes[modeIdx] == GameMode.DEATHMATCH || modes[modeIdx] == GameMode.TEAM_DEATHMATCH
 
     NfScreen(
         "MATCH SETUP",
@@ -41,13 +46,17 @@ fun MatchSetupScreen(api: GameApi, onBack: () -> Unit, onOpen: (String) -> Unit)
                 horizontalArrangement = Arrangement.spacedBy(6.dp)
             ) {
                 NfIcon(NfIconKind.GROUP, Modifier.size(18.dp), NfColors.TextDim)
-                NfText("4/16", size = 13, color = NfColors.TextDim)
+                NfText(
+                    if (botMode) "${bots + 1}/${MatchSettings.MAX_BOTS + 1}" else "4/16",
+                    size = 13,
+                    color = NfColors.TextDim
+                )
             }
         }
     ) {
         Row(Modifier.fillMaxSize(), horizontalArrangement = Arrangement.spacedBy(12.dp)) {
 
-            // Left: mode, map, preview, invite
+            // Left: mode, map, bots, preview, invite
             Column(
                 Modifier.weight(1f).fillMaxHeight(),
                 verticalArrangement = Arrangement.spacedBy(8.dp)
@@ -80,6 +89,26 @@ fun MatchSetupScreen(api: GameApi, onBack: () -> Unit, onOpen: (String) -> Unit)
                         api.match.arena = arenas[arenaIdx]
                     }
                 )
+                // Bots: only for Deathmatch and Team Deathmatch
+                if (botMode) {
+                    NfRow("Bots (you + $bots)") {
+                        Stepper(
+                            "$bots",
+                            onMinus = {
+                                if (bots > 1) {
+                                    bots -= 1
+                                    MatchSettings.botCount = bots
+                                }
+                            },
+                            onPlus = {
+                                if (bots < MatchSettings.MAX_BOTS) {
+                                    bots += 1
+                                    MatchSettings.botCount = bots
+                                }
+                            }
+                        )
+                    }
+                }
                 NfPanel(Modifier.fillMaxWidth().weight(1f)) {
                     ArtBlock(
                         Modifier.fillMaxSize(),
@@ -143,6 +172,7 @@ fun MatchSetupScreen(api: GameApi, onBack: () -> Unit, onOpen: (String) -> Unit)
                     primary = true,
                     size = 22
                 ) {
+                    MatchSettings.botCount = bots
                     api.startMatch()
                     onOpen("hud")
                 }
