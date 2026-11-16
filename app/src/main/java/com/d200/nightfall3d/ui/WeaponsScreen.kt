@@ -48,6 +48,8 @@ import io.github.sceneview.rememberNodes
 //     The cards turn slowly; the big preview on the right turns too.
 //  2) The SELECT / REMOVE button is always full size (52 dp) and pinned at the bottom. Only the info above it scrolls.
 //  3) Orange accent (was green).
+//  4) BUILD FIX: the SELECT button now uses a plain copy of the gun name (selectedName),
+//     so the click no longer reads sel.name inside the click lambda.
 //
 // LOADOUT: you can select only 5 weapons for now (GunLoadout.MAX). The first one selected is the starting gun.
 // TO GIVE A GUN ITS REAL INFO, edit GUN_INFO below.
@@ -108,7 +110,7 @@ fun WeaponsScreen(api: GameApi, onBack: () -> Unit, onOpen: (String) -> Unit) {
     val picked = remember { mutableStateListOf<String>().apply { addAll(GunLoadout.names(names)) } }
     var selName by remember { mutableStateOf(picked.firstOrNull() ?: (names.firstOrNull() ?: "")) }
     val list = if (tab == 0) rows else rows.filter { it.info.category.equals(tabs[tab], ignoreCase = true) }
-    val sel = rows.firstOrNull { it.name == selName } ?: rows.firstOrNull()
+    val sel: GunRow? = rows.firstOrNull { it.name == selName } ?: rows.firstOrNull()
 
     // ONE 3D engine shared by every gun picture on this screen (light on memory)
     val engine = rememberEngine()
@@ -124,11 +126,11 @@ fun WeaponsScreen(api: GameApi, onBack: () -> Unit, onOpen: (String) -> Unit) {
     }
 
     // select / unselect a gun, keep the loadout for the match
-    fun toggle(name: String) {
-        if (name in picked) {
-            if (picked.size > 1) picked.remove(name)
+    fun toggle(gunName: String) {
+        if (gunName in picked) {
+            if (picked.size > 1) picked.remove(gunName)
         } else if (picked.size < GunLoadout.MAX) {
-            picked.add(name)
+            picked.add(gunName)
         }
         GunLoadout.picked = picked.toList()
         if (picked.isNotEmpty()) api.equippedWeaponId = picked.first()
@@ -202,6 +204,7 @@ fun WeaponsScreen(api: GameApi, onBack: () -> Unit, onOpen: (String) -> Unit) {
                 // right: details. The info scrolls, the button stays big at the bottom.
                 if (sel != null) {
                     val panelShape = RoundedCornerShape(8.dp)
+                    val selectedName: String = sel.name      // plain copy, used by the button click below
                     Column(
                         Modifier
                             .weight(1f)
@@ -215,7 +218,7 @@ fun WeaponsScreen(api: GameApi, onBack: () -> Unit, onOpen: (String) -> Unit) {
                             Modifier.weight(1f).fillMaxWidth().verticalScroll(rememberScrollState()),
                             verticalArrangement = Arrangement.spacedBy(8.dp)
                         ) {
-                            NfText(sel.name, size = 24, bold = true)
+                            NfText(selectedName, size = 24, bold = true)
                             if (sel.info.description.isNotEmpty()) {
                                 NfText(sel.info.description, size = 12, color = DimText)
                             }
@@ -226,7 +229,7 @@ fun WeaponsScreen(api: GameApi, onBack: () -> Unit, onOpen: (String) -> Unit) {
                                     .clip(RoundedCornerShape(6.dp))
                                     .background(CardBg)
                             ) {
-                                key(sel.name) {
+                                key(selectedName) {
                                     GunPicture(engine, modelLoader, environment, sel.file, Modifier.fillMaxSize(), 0f)
                                 }
                             }
@@ -238,7 +241,7 @@ fun WeaponsScreen(api: GameApi, onBack: () -> Unit, onOpen: (String) -> Unit) {
 
                         Spacer(Modifier.height(10.dp))
 
-                        val isPicked = sel.name in picked
+                        val isPicked = selectedName in picked
                         val full = picked.size >= GunLoadout.MAX
                         // SELECT is orange. REMOVE, and SELECT when the 5 are full, are dark.
                         val canClick = if (isPicked) picked.size > 1 else !full
@@ -252,7 +255,7 @@ fun WeaponsScreen(api: GameApi, onBack: () -> Unit, onOpen: (String) -> Unit) {
                                 .clip(btnShape)
                                 .background(if (filled) Accent else CardBg)
                                 .border(1.5.dp, if (canClick) Accent else LineColor, btnShape)
-                                .clickable(enabled = canClick) { toggle(sel.name) },
+                                .clickable(enabled = canClick) { toggle(selectedName) },
                             contentAlignment = Alignment.Center
                         ) {
                             NfText(
