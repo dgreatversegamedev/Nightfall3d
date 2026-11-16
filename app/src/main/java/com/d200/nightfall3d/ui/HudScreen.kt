@@ -14,12 +14,14 @@ import androidx.compose.foundation.shape.CutCornerShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.alpha
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.graphics.Brush
@@ -39,36 +41,28 @@ import com.d200.nightfall3d.game.MatchSettings
 import com.d200.nightfall3d.game.MatchState
 import com.d200.nightfall3d.game.PLAYER_MAX_HP
 import com.d200.nightfall3d.game.CHAR_FILES
+import com.d200.nightfall3d.game.GUNS
 import com.d200.nightfall3d.game.Game3DView
 import com.d200.nightfall3d.game.gunNames
 import com.d200.nightfall3d.ui.theme.*
+import kotlinx.coroutines.delay
 import kotlin.math.hypot
 import kotlin.math.roundToInt
 
 // In-game HUD built from the reference image (1672 x 941).
 // All icons are drawn in code (HudIcons.kt). No emojis, no stick figures, no image files for buttons.
 //
-// This screen now has the real 3D game behind it (Game3DView.kt). The buttons write into one GameInput:
-//   walk stick  -> move
-//   fire ring   -> aim + shoot (gun mode)   |   big fist button -> punch (hand mode)
-//   jump        -> jump
-//   Switch (round button beside the fire ring) -> gun mode or hand mode (fists: gun hidden, only punch / jump / crouch)
-//   weapon list -> which gun is in the hand
+// The buttons write into one GameInput (read by Game3DView.kt):
+//   walk stick -> move | fire ring -> aim + shoot (gun mode) / big fist button -> punch (hand mode)
+//   jump | Switch (gun mode <-> hand mode) | weapon list -> which gun is in the hand
 //
-// DEATHMATCH / TEAM DEATHMATCH (new)
-//   When the mode picked on Match Setup is Deathmatch or Team Deathmatch, a MatchState (MatchLogic.kt) is made here
-//   and handed to the 3D game through input.match. The HUD then shows:
-//     top centre   scoreboard (top 3 in Deathmatch, team scores in Team Deathmatch) + clock + kill feed
-//     top right    players in the match, your kills
-//     bottom       your real health
-//     centre       ELIMINATED + respawn countdown, and the MATCH OVER screen
+// CHANGES IN THIS VERSION (Build 1 fixes)
+//  1) Top right icons are now LIVE: blue icon = friends alive (you included), red skull = enemies alive.
+//  2) Scope button only works on a gun that has a scope (GunDef.hasScope). Other guns: the button is dimmed
+//     and shows "This gun has no scope".
+//  3) Orange accent on the scoreboard title.
 //
-// One size system, so nothing looks random:
-//   BIG   112  shield, jump, crouch, prone, sprint
-//   MID    88  backpack, medkit, grenade
-//   SMALL  80  symmetry, scope, sentry turret
-//   TOP    58  mic, speaker, emoji, chat
-//   sticks 220 (walk) and 200 (fire ring)
+// One size system: BIG 112 | MID 88 | SMALL 80 | TOP 58 | sticks 220 (walk) and 200 (fire ring)
 // One colour system: dark navy glass, steel ring when idle, Nightfall orange when active.
 
 private val Glass = Color(0xE00A1230)
@@ -146,8 +140,7 @@ private fun CodeButton(
 /**
  * Draggable stick. Reports x/y in -1..1 through [onChange].
  * Left stick walks (moves from where you first touch it).
- * Right stick (the bullet ring) aims and shoots. It measures your finger from the CENTRE of the ring,
- * so the direction you see is the direction you aim, in every direction (left, middle, right, back).
+ * Right stick (the bullet ring) aims and shoots. It measures your finger from the CENTRE of the ring.
  */
 @Composable
 private fun Stick(
@@ -280,7 +273,7 @@ private fun ScoreBoard(k: Float, modifier: Modifier, mt: MatchState) {
         verticalArrangement = Arrangement.spacedBy((2 * k).dp)
     ) {
         Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
-            NfText(mt.mode.label.uppercase(), size = fsz(k, 20f), color = NfColors.Cyan, bold = true)
+            NfText(mt.mode.label.uppercase(), size = fsz(k, 20f), color = Orange, bold = true)
             NfText(clock, size = fsz(k, 22f), bold = true)
         }
         if (mt.teamMode) {
@@ -340,14 +333,24 @@ fun HudScreen(api: GameApi, onExit: () -> Unit) {
     var turretOn by remember { mutableStateOf(false) }
     var shieldOn by remember { mutableStateOf(false) }
     var scopeOn by remember { mutableStateOf(false) }
+    var noScopeMsg by remember { mutableStateOf(false) }
     var ducking by remember { mutableStateOf(false) }
     var symmetryOn by remember { mutableStateOf(false) }
+
+    // "This gun has no scope" message goes away by itself
+    LaunchedEffect(noScopeMsg) {
+        if (noScopeMsg) {
+            delay(1500)
+            noScopeMsg = false
+        }
+    }
 
     /** Gun mode <-> hand mode. Hand mode hides the gun, stops shooting and turns the fire ring into a punch button. */
     fun setHand(v: Boolean) {
         handMode = v
         menuOpen = false
         scopeOn = false
+        input.scopeOn = false
         input.handMode = v
         input.shooting = false
         input.aimHeld = false
@@ -362,8 +365,12 @@ fun HudScreen(api: GameApi, onExit: () -> Unit) {
     val selected = if (handMode) meleeIdx + 1 else gunIdx
     val currentName = options.getOrNull(selected) ?: "No weapon"
 
-    // Players in this match: you + the bots. Without a match it is only you.
-    val playersJoined = if (match != null) match.bots.size + 1 else 1
+    // Does the gun in his hand have a scope? (set hasScope = true on the gun in GUNS, Game3DView.kt)
+    val gunHasScope = !handMode && GUNS.getOrNull(allGuns.indexOf(currentName))?.hasScope == true
+
+    // LIVE counts: friends alive (you included) and enemies alive
+    val friends = match?.friendsAlive ?: 1
+    val enemies = match?.enemiesAlive ?: 0
     val hp = match?.playerHp ?: PLAYER_MAX_HP
 
     BoxWithConstraints(
@@ -379,7 +386,6 @@ fun HudScreen(api: GameApi, onExit: () -> Unit) {
             minOf(maxWidth.value, maxHeight.value) / 1100f
         }
 
-        // The frame fills the whole screen, so nothing is cut off and nothing floats in the middle.
         Box(Modifier.fillMaxSize()) {
             // ---------------- the real 3D game (arena, character, camera drag / pinch)
             Game3DView(input = input, modifier = Modifier.fillMaxSize(), charIndex = charIndex)
@@ -399,12 +405,15 @@ fun HudScreen(api: GameApi, onExit: () -> Unit) {
                 }
             }
 
-            // scope overlay (guns only)
-            if (scopeOn && !handMode) {
+            // scope overlay (only a gun that has a scope)
+            if (scopeOn && gunHasScope) {
                 Canvas(Modifier.fillMaxSize()) {
                     val c = Offset(size.width / 2f, size.height / 2f)
-                    val r = size.height * 0.32f
-                    drawCircle(Color(0x66FFFFFF), r, c, style = Stroke(2f))
+                    val r = size.height * 0.40f
+                    // dark edges around the round lens
+                    drawRect(Color(0xCC000000), Offset.Zero, androidx.compose.ui.geometry.Size(c.x - r, size.height))
+                    drawRect(Color(0xCC000000), Offset(c.x + r, 0f), androidx.compose.ui.geometry.Size(size.width - c.x - r, size.height))
+                    drawCircle(Color(0x99FFFFFF), r, c, style = Stroke(3f))
                     drawLine(Color(0x88FFFFFF), Offset(c.x - r, c.y), Offset(c.x + r, c.y), 1.5f)
                     drawLine(Color(0x88FFFFFF), Offset(c.x, c.y - r), Offset(c.x, c.y + r), 1.5f)
                 }
@@ -440,8 +449,8 @@ fun HudScreen(api: GameApi, onExit: () -> Unit) {
                 }
             }
 
-            // ---------------- top right: players joined, kills, settings
-            // All boxes use the same dark glass. Only the small icon carries colour.
+            // ---------------- top right: friends alive, enemies alive, settings
+            // blue icon = friends still alive (you included)    red skull = enemies still alive
             val infoShape = RoundedCornerShape((5 * k).dp)
             Row(
                 edgeTR(k, 172f, 10f)
@@ -454,7 +463,7 @@ fun HudScreen(api: GameApi, onExit: () -> Unit) {
             ) {
                 GlyphIcon(Glyph.PLAYERS, Modifier.sized(k, 32f, 32f), main = Color(0xFF35D3FF))
                 Spacer(Modifier.width((8 * k).dp))
-                NfText("$playersJoined", size = fsz(k, 27f), bold = true)
+                NfText("$friends", size = fsz(k, 27f), bold = true)
             }
             Row(
                 edgeTR(k, 60f, 10f)
@@ -467,7 +476,7 @@ fun HudScreen(api: GameApi, onExit: () -> Unit) {
             ) {
                 GlyphIcon(Glyph.SKULL, Modifier.sized(k, 32f, 32f), main = Color(0xFFE5483C))
                 Spacer(Modifier.width((10 * k).dp))
-                NfText(if (match != null) "${match.myKills()}" else "4", size = fsz(k, 27f), bold = true)
+                NfText("$enemies", size = fsz(k, 27f), bold = true)
             }
             // settings gear: leaves the match
             GlyphIcon(
@@ -579,12 +588,32 @@ fun HudScreen(api: GameApi, onExit: () -> Unit) {
                     k, atBR(k, 1130f, 600f, SMALL, SMALL), SMALL, Glyph.SYMMETRY, 0.60f,
                     if (symmetryOn) Orange else RingIdle, if (symmetryOn) 3f else 2f
                 ) { symmetryOn = !symmetryOn }
-                CodeButton(k, atBR(k, 1130f, 695f, SMALL, SMALL), SMALL, NfIconKind.SCOPE, scopeOn) {
-                    scopeOn = !scopeOn
+                // scope: works only on a gun with a scope. Other guns: dimmed + a short message.
+                CodeButton(
+                    k,
+                    atBR(k, 1130f, 695f, SMALL, SMALL).alpha(if (gunHasScope) 1f else 0.4f),
+                    SMALL, NfIconKind.SCOPE, scopeOn && gunHasScope
+                ) {
+                    if (gunHasScope) {
+                        scopeOn = !scopeOn
+                        input.scopeOn = scopeOn      // camera moves to his shoulder
+                    } else {
+                        noScopeMsg = true
+                    }
                 }
                 CodeButton(k, atBR(k, 1130f, 790f, SMALL, SMALL), SMALL, NfIconKind.TURRET, turretOn) {
                     turretOn = !turretOn
                 }
+            }
+
+            if (noScopeMsg) {
+                NfText(
+                    "This gun has no scope",
+                    size = fsz(k, 26f),
+                    bold = true,
+                    color = Color(0xFFFFB070),
+                    modifier = Modifier.align(Alignment.BottomCenter).padding(bottom = (130 * k).dp)
+                )
             }
 
             // ---------------- bottom centre: health bar (real health in a match)
@@ -633,6 +662,8 @@ fun HudScreen(api: GameApi, onExit: () -> Unit) {
                                     input.gunWanted = allGuns.indexOf(name).coerceAtLeast(0)      // puts that gun in his hand
                                     api.equippedWeaponId = name
                                 }
+                                scopeOn = false             // a new weapon starts un-scoped
+                                input.scopeOn = false
                                 menuOpen = false
                             }
                         ) {
