@@ -70,6 +70,9 @@ class MatchConfig {
     var autoPickup: Boolean = true
     var weaponLimit: Boolean = false
     var timeLimit: Int = 10
+
+    // Capture the Flag: how many captures win the match. 0 = no limit (keep capturing until the time is up).
+    var captureLimit: Int = 0
 }
 
 class GameSettings {
