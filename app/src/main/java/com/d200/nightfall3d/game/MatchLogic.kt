@@ -23,7 +23,7 @@ import kotlin.random.Random
 //   fighter id 0   = you
 //   fighter id 1.. = bots
 //   Deathmatch      : everybody is an enemy of everybody (each bot has its own team number)
-//   Team Deathmatch : you + the first half of the bots = team 0 (allies), the rest = team 1 (enemies)
+//   Team Deathmatch : you + the BLUE bots = team 0 (allies), the RED bots = team 1 (enemies)
 //                     bullets pass through allies (no friendly fire)
 //   Capture the Flag: same two teams as Team Deathmatch. Team 0 base = the blue pad, team 1 base = the red pad.
 //
@@ -39,13 +39,17 @@ import kotlin.random.Random
 //     path finder (NavGrid, at the bottom of this file) so they can walk around the walls.
 //
 // CHANGES IN THIS VERSION
-//  1) Capture the Flag mode (see above). Flags: flagState / flagCarrier / flagX/Y/Z / homeX/Y/Z.
-//  2) HUD helper values: ownFlag, enemyFlag, youCarry, objText.
+//  1) MatchSettings.blueBots / redBots: the Match Setup screen chooses how many bots are on each team
+//     (Team Deathmatch and Capture the Flag). MAX_BOTS is now 8 in total.
+//  2) When a bullet hits you while your shield is on, the hit is sent to the shield effect (rig.shieldHitT + direction)
+//     and makes sparks instead of blood.
 // =====================================================================
 
 object MatchSettings {
-    var botCount = 5               // set by the Match Setup screen
-    const val MAX_BOTS = 7         // more bots = more RAM (each bot is one more copy of the blue GLB + a gun)
+    var botCount = 5               // Deathmatch: set by the Match Setup screen
+    var blueBots = 2               // Team Deathmatch / Capture the Flag: bots on YOUR team (you not counted)
+    var redBots = 3                // Team Deathmatch / Capture the Flag: bots on the enemy team
+    const val MAX_BOTS = 8         // more bots = more RAM (each bot is one more copy of the blue GLB + a gun)
 }
 
 internal const val PLAYER_MAX_HP = 200
@@ -62,6 +66,8 @@ private const val BOT_BULLET_DMG = 9          // bot bullet damage (low, so the 
 private const val PUNCH_DMG = 40
 private const val PUNCH_RANGE = 1.4f
 private const val SHIELD_KEEP = 0.3f          // with the shield on you take only this part of the damage
+private const val SHIELD_CENTER_Y = 0.9f      // same as SHIELD_CY in Game3DView.kt
+private const val SHIELD_HIT_SEC = 0.7f       // same as SHIELD_HIT_TIME in Game3DView.kt
 private const val RESPAWN_SECONDS = 3f
 private const val KILL_LIMIT_DM = 10          // first to this many kills wins (Deathmatch)
 private const val KILL_LIMIT_TDM = 25         // first team to this many kills wins (Team Deathmatch)
@@ -133,19 +139,31 @@ internal class Bot(val id: Int, val team: Int) {
 
 internal class ScoreRow(val name: String, val kills: Int, val deaths: Int, val team: Int, val isYou: Boolean)
 
+// blueBots / redBots: how many bots on each team. Used only in Team Deathmatch and Capture the Flag
+// (-1 = not given: the bots are split in half).
 internal class MatchState(
     val mode: GameMode,
     requestedBots: Int,
     timeLimitMin: Int,
-    val captureLimit: Int = 0
+    val captureLimit: Int = 0,
+    blueBots: Int = -1,
+    redBots: Int = -1
 ) {
     val ctf = mode == GameMode.CAPTURE_FLAG
     val teamMode = mode == GameMode.TEAM_DEATHMATCH || ctf
     val bots: List<Bot>
 
     init {
-        val n = requestedBots.coerceIn(1, MatchSettings.MAX_BOTS)
-        bots = List(n) { i -> Bot(i + 1, if (teamMode) (if (i < n / 2) 0 else 1) else i + 1) }
+        val n: Int
+        val nBlue: Int
+        if (teamMode && blueBots >= 0 && redBots >= 0) {
+            n = (blueBots + redBots).coerceIn(1, MatchSettings.MAX_BOTS)
+            nBlue = blueBots.coerceAtMost(n - 1)          // always at least one enemy bot
+        } else {
+            n = requestedBots.coerceIn(1, MatchSettings.MAX_BOTS)
+            nBlue = n / 2
+        }
+        bots = List(n) { i -> Bot(i + 1, if (teamMode) (if (i < nBlue) 0 else 1) else i + 1) }
         // Capture the Flag roles: in each team the 1st bot attacks, the 2nd defends, the 3rd attacks ...
         val seen = IntArray(2)
         if (teamMode) {
@@ -194,7 +212,7 @@ internal class MatchState(
     private var nav: NavGrid? = null
 
     // ---- hit spots for the sparks / blood (filled here, emptied by Game3DView every frame) ----
-    // each entry = [x, y, z, kind]   kind 0 = bullet hit a wall (sparks), kind 1 = bullet hit a fighter (blood)
+    // each entry = [x, y, z, kind]   kind 0 = bullet hit a wall or your shield (sparks), kind 1 = bullet hit a fighter (blood)
     val hitFx = ArrayList<FloatArray>()
 
     // ---- bot bullets (drawn by Game3DView) ----
@@ -294,7 +312,26 @@ internal class MatchState(
             val fy = feetY(id, rig)
             if (y < fy || y > fy + HIT_HEIGHT) continue
             val dmg = if (owner == 0) PLAYER_BULLET_DMG else BOT_BULLET_DMG
-            addHit(x, y, z, 1)                       // blood
+            if (id == 0 && rig.shieldOn) {
+                // the shield took the hit: sparks (no blood) + tell the shield effect where it was hit
+                addHit(x, y, z, 0)
+                val sx = x - rig.x
+                val sy = y - (rig.y + rig.jumpH + SHIELD_CENTER_Y)
+                val sz = z - rig.z
+                val l = hypot(hypot(sx, sy), sz)
+                if (l > 0.001f) {
+                    rig.shieldDx = sx / l
+                    rig.shieldDy = sy / l
+                    rig.shieldDz = sz / l
+                } else {
+                    rig.shieldDx = 0f
+                    rig.shieldDy = 0f
+                    rig.shieldDz = 1f
+                }
+                rig.shieldHitT = SHIELD_HIT_SEC
+            } else {
+                addHit(x, y, z, 1)                   // blood
+            }
             if (id == 0) damagePlayer(dmg, owner, rig) else damageBot(bots[id - 1], dmg, owner)
             return true
         }
