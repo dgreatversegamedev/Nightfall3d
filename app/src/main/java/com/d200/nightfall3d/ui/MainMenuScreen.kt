@@ -12,10 +12,7 @@ import androidx.compose.runtime.Composable
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
-import androidx.compose.ui.draw.drawBehind
 import androidx.compose.ui.draw.drawWithContent
-import androidx.compose.ui.geometry.CornerRadius
-import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.geometry.Size
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
@@ -30,14 +27,20 @@ import com.d200.nightfall3d.ui.theme.*
 // Sizes and positions are in reference pixels, scaled by k.
 //
 // One grid, so nothing looks random:
-//   left menu rows   250 x 56, pitch 64, x = 14
+//   left menu rows   250 x 56, pitch 64, x = 14  (slanted like START, text only, no icons)
 //   top icons        54 wide, pitch 88, right aligned
 //   right tiles      140 x 170, pitch 150
-//   bottom edge      915 for the bottom bar, the box and START
+//   bottom edge      915 for the bottom bar and START
 //   margins 14, gaps 12
 // Icons are drawn in code (HudIcons.kt). Art images are only used for the background,
 // banner, battle royale picture, booyah pass logo and the avatar.
 // One colour system: navy glass, steel/white lines, Nightfall orange for highlights.
+//
+// CHANGES IN THIS VERSION
+//  1) Left menu rows (Store ... Events) are slanted like the START button, same size, and have no icons.
+//  2) The chat strip ("[World] Kingz: Let's squad up!") is removed.
+//  3) The box button next to START is removed.
+//  4) START has no curved glow behind it any more, only the slanted shape.
 
 // ------------------------------------------------------------------ layout helpers
 // If any of these already exist elsewhere in the package, delete the copy here.
@@ -111,20 +114,19 @@ private val LIVE_ROUTES = setOf(
 private class MenuEntry(
     val label: String,
     val route: String,
-    val glyph: Glyph,
     val hot: Boolean,
     val badge: Boolean
 )
 
 private val entries = listOf(
-    MenuEntry("Store", "store", Glyph.STORE, true, true),
-    MenuEntry("Luck Royale", "luck", Glyph.LUCK, true, true),
-    MenuEntry("Character", "character", Glyph.CHARACTER, false, false),
-    MenuEntry("Vault", "vault", Glyph.VAULT, false, false),
-    MenuEntry("Weapons", "weapons", Glyph.PISTOL, false, false),
-    MenuEntry("Pet", "pet", Glyph.WOLF, false, false),
-    MenuEntry("Missions", "missions", Glyph.MISSIONS, false, false),
-    MenuEntry("Events", "events", Glyph.EVENTS, false, true)
+    MenuEntry("Store", "store", true, true),
+    MenuEntry("Luck Royale", "luck", true, true),
+    MenuEntry("Character", "character", false, false),
+    MenuEntry("Vault", "vault", false, false),
+    MenuEntry("Weapons", "weapons", false, false),
+    MenuEntry("Pet", "pet", false, false),
+    MenuEntry("Missions", "missions", false, false),
+    MenuEntry("Events", "events", false, true)
 )
 
 private const val ROW_X = 14f
@@ -250,21 +252,19 @@ private fun MenuFrame(k: Float, name: String, level: Int, coins: Int, diamonds: 
             TopIcon(k, Modifier, Glyph.GEAR) { go("settings") }
         }
 
-        // ---------- left: banner, equal glass menu rows, chat strip
+        // ---------- left: banner and the slanted menu rows
         MenuBanner(k, atTL(k, ROW_X, 100f)) { go("battlepass") }
         entries.forEachIndexed { i, e ->
             MenuRow(k, e, atTL(k, ROW_X, ROW_Y + i * ROW_PITCH)) { go(e.route) }
         }
-        ChatStrip(k, atTL(k, ROW_X, 788f))
 
         // ---------- right: two small tiles, pinned to the right edge
         GiftTile(k, atTR(k, 1448f, 90f, 104f)) { go("gifts") }
         TopUpTile(k, atTR(k, 1558f, 90f, 104f))
 
-        // ---------- right: mode card, ranked, box + START
+        // ---------- right: mode card, ranked, START
         BrCard(k, atTR(k, 1313f, 300f, 345f)) { go("play") }
         RankedCard(k, atTR(k, 1237f, 706f, 420f), { go("play") }, { go("friends") })
-        MenuBox(k, atTR(k, 1214f, 809f, 106f))
         StartButton(k, atTR(k, 1335f, 809f, 322f)) { go("play") }
 
         // ---------- bottom bar
@@ -349,15 +349,11 @@ private fun PortraitMenu(k: Float, name: String, level: Int, coins: Int, diamond
 
             Spacer(Modifier.weight(1f))
 
-            // bottom: ranked, box + START, bar
+            // bottom: ranked, START, bar
             Column(Modifier.fillMaxWidth(), horizontalAlignment = Alignment.End) {
                 RankedCard(k, Modifier, { go("play") }, { go("friends") })
                 Spacer(Modifier.height((12 * k).dp))
-                Row(verticalAlignment = Alignment.CenterVertically) {
-                    MenuBox(k, Modifier)
-                    Spacer(Modifier.width((14 * k).dp))
-                    StartButton(k, Modifier) { go("play") }
-                }
+                StartButton(k, Modifier) { go("play") }
                 Spacer(Modifier.height((12 * k).dp))
                 BottomBar(k, Modifier.fillMaxWidth().height((58 * k).dp), go)
             }
@@ -379,10 +375,13 @@ private fun MenuBanner(k: Float, modifier: Modifier, onClick: () -> Unit) {
     ) { ArtImage("menu_banner", Modifier.fillMaxSize(), ContentScale.FillBounds) }
 }
 
-/** Every menu row has the same size. Only Store and Luck Royale are highlighted. */
+/**
+ * Every menu row has the same size and the same slant as START. Text only, no icon.
+ * Only Store and Luck Royale are highlighted. Change the slant with the number inside SlantShape(...).
+ */
 @Composable
 private fun MenuRow(k: Float, e: MenuEntry, modifier: Modifier, onClick: () -> Unit) {
-    val shape = RoundedCornerShape((5 * k).dp)
+    val shape = SlantShape((14 * k).dp)
     Box(
         modifier
             .sized(k, ROW_W, ROW_H)
@@ -391,15 +390,9 @@ private fun MenuRow(k: Float, e: MenuEntry, modifier: Modifier, onClick: () -> U
             .border((1.5f * k).dp, if (e.hot) Orange else Line, shape)
             .clickable { onClick() }
     ) {
-        Box(
-            Modifier.align(Alignment.CenterStart).padding(start = (14 * k).dp).sized(k, 40f, 40f),
-            contentAlignment = Alignment.Center
-        ) {
-            GlyphIcon(e.glyph, Modifier.sized(k, 38f, 38f), main = if (e.hot) Orange else Color.White, accent = if (e.hot) Color.White else Orange)
-        }
         NfText(
             e.label.uppercase(),
-            Modifier.align(Alignment.CenterStart).padding(start = (68 * k).dp),
+            Modifier.align(Alignment.CenterStart).padding(start = (34 * k).dp),
             size = fsz(k, 26f),
             bold = true,
             color = if (e.hot) Orange else Color.White
@@ -408,30 +401,12 @@ private fun MenuRow(k: Float, e: MenuEntry, modifier: Modifier, onClick: () -> U
             Box(
                 Modifier
                     .align(Alignment.TopEnd)
-                    .padding(top = (6 * k).dp, end = (8 * k).dp)
+                    .padding(top = (6 * k).dp, end = (22 * k).dp)
                     .size((11 * k).dp)
                     .clip(CircleShape)
                     .background(Orange)
             )
         }
-    }
-}
-
-@Composable
-private fun ChatStrip(k: Float, modifier: Modifier) {
-    val shape = RoundedCornerShape((5 * k).dp)
-    Row(
-        modifier
-            .sized(k, 520f, 54f)
-            .clip(shape)
-            .background(GlassBrush)
-            .border((1.5f * k).dp, Line, shape)
-            .padding(horizontal = (14 * k).dp),
-        verticalAlignment = Alignment.CenterVertically
-    ) {
-        GlyphIcon(Glyph.CHAT, Modifier.sized(k, 34f, 34f))
-        Spacer(Modifier.width((14 * k).dp))
-        NfText("[World] Kingz: Let's squad up!", size = fsz(k, 22f), maxLines = 1)
     }
 }
 
@@ -562,33 +537,13 @@ private fun RankedCard(k: Float, modifier: Modifier, onPlay: () -> Unit, onFrien
     }
 }
 
-@Composable
-private fun MenuBox(k: Float, modifier: Modifier) {
-    val shape = RoundedCornerShape((8 * k).dp)
-    Box(
-        modifier
-            .sized(k, 106f, 106f)
-            .clip(shape)
-            .background(GlassBrush)
-            .border((2 * k).dp, Orange, shape),
-        contentAlignment = Alignment.Center
-    ) { GlyphIcon(Glyph.CUBE, Modifier.sized(k, 72f, 72f)) }
-}
-
+/** START: slanted shape only. The rounded glow that used to sit behind it is gone. */
 @Composable
 private fun StartButton(k: Float, modifier: Modifier, onClick: () -> Unit) {
     val slant = SlantShape((26 * k).dp)
     Box(
         modifier
             .sized(k, 322f, 106f)
-            .drawBehind {
-                drawRoundRect(
-                    Orange.copy(alpha = 0.22f),
-                    Offset(-8f, -8f),
-                    Size(size.width + 16f, size.height + 16f),
-                    CornerRadius(30f)
-                )
-            }
             .clip(slant)
             .background(OrangeBrush)
             .drawWithContent {
