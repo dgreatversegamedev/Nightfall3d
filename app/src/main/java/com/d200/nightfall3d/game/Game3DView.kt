@@ -1,30 +1,11 @@
 package com.d200.nightfall3d.game
 
-import android.content.Context
 import android.util.Log
-import androidx.compose.foundation.Canvas
-import androidx.compose.foundation.background
-import androidx.compose.foundation.border
-import androidx.compose.foundation.clickable
 import androidx.compose.foundation.gestures.awaitEachGesture
 import androidx.compose.foundation.gestures.awaitFirstDown
-import androidx.compose.foundation.gestures.detectTapGestures
-import androidx.compose.foundation.horizontalScroll
-import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
-import androidx.compose.foundation.layout.Column
-import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxSize
-import androidx.compose.foundation.layout.fillMaxWidth
-import androidx.compose.foundation.layout.offset
 import androidx.compose.foundation.layout.padding
-import androidx.compose.foundation.layout.size
-import androidx.compose.foundation.layout.widthIn
-import androidx.compose.foundation.rememberScrollState
-import androidx.compose.foundation.shape.CircleShape
-import androidx.compose.foundation.shape.RoundedCornerShape
-import androidx.compose.material3.DropdownMenu
-import androidx.compose.material3.DropdownMenuItem
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
@@ -32,27 +13,13 @@ import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
-import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
 import androidx.compose.runtime.withFrameNanos
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
-import androidx.compose.ui.draw.clip
-import androidx.compose.ui.geometry.CornerRadius
-import androidx.compose.ui.geometry.Offset
-import androidx.compose.ui.geometry.Size
-import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
-import androidx.compose.ui.graphics.Path
-import androidx.compose.ui.graphics.StrokeCap
-import androidx.compose.ui.graphics.StrokeJoin
-import androidx.compose.ui.graphics.drawscope.DrawScope
-import androidx.compose.ui.graphics.drawscope.Stroke
 import androidx.compose.ui.input.pointer.pointerInput
-import androidx.compose.ui.layout.onSizeChanged
 import androidx.compose.ui.platform.LocalContext
-import androidx.compose.ui.unit.IntOffset
-import androidx.compose.ui.unit.IntSize
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.google.android.filament.Engine
@@ -73,42 +40,29 @@ import io.github.sceneview.rememberEngine
 import io.github.sceneview.rememberMaterialLoader
 import io.github.sceneview.rememberModelLoader
 import io.github.sceneview.rememberNodes
-import kotlinx.coroutines.launch
 import kotlin.math.PI
 import kotlin.math.atan2
 import kotlin.math.cos
 import kotlin.math.hypot
 import kotlin.math.max
 import kotlin.math.min
-import kotlin.math.roundToInt
 import kotlin.math.sin
 import kotlin.math.sqrt
+import kotlin.random.Random
 
 // =====================================================================
 // Game3DView.kt  -  the 3D ENGINE (no buttons in here).
 // It draws the arena + character + gun, moves him, plays the animations, shoots bullets and turns the camera.
-// The HUD (HudScreen.kt) does not touch this file. It only writes into one GameInput object:
-//   joyX / joyY      move stick (-1..1)
-//   aimHeld/shooting/aimX/aimY   fire stick
-//   punchTap = true  one punch (cycles punch_1 -> punch_2 -> punch_3)
-//   jumpTap  = true  one jump
-//   handMode = true  fists: gun hidden, no shooting
-//   gunWanted = n    which gun is in the hand (index in GUNS)
-//   match            the Deathmatch / Team Deathmatch logic (MatchLogic.kt). null = no match, just you.
-// Drag on the open screen = turn camera. Two fingers = pinch zoom / twist.
+// The HUD (HudScreen.kt) only writes into one GameInput object (see the class below).
 //
 // Needs in app/src/main/assets/ : arena_play.glb, arena_play.json, char_blue.glb
 // Optional (gun in hand): mp5_gun.glb, ak47_gun.glb, ar_gun.glb  (the game still works without them)
 //
-// CHANGES IN THIS VERSION (Deathmatch test)
-//  1) BOTS: when rig.match is set, every bot is one more copy of char_blue.glb (same file, no new data),
-//     with a gun in the hand, a coloured marker over the head (green = ally, red = enemy) and a health bar.
-//  2) HITS: your bullets now ask the match if they hit a bot. Bots shoot back with their own bullet pool.
-//  3) DEAD: while you are eliminated the character is hidden and the controls are ignored until you respawn.
-//
-// Earlier changes
-//  - AIMING: bullets fly exactly where the fire ring points (360 degrees).
-//  - JUMPING: tryMove() and groundY() get his feet height (sandbags can be jumped over, crates landed on).
+// CHANGES IN THIS VERSION (Build 1 fixes)
+//  1) BULLETS: long glowing tracer, muzzle flash at the gun, orange sparks when a bullet hits a wall,
+//     red blood burst when it hits a fighter.
+//  2) SHIELD: a bubble made of hexagon + pentagon panels (soccer-ball cage) all around the character.
+//  3) SCOPE: GunDef.hasScope. Only guns with a scope can zoom. When scoped the camera moves to his shoulder.
 // =====================================================================
 
 // ---- Tuning numbers: change these if something looks wrong ----
@@ -116,9 +70,9 @@ private const val CHAR_HEIGHT = 1.8f      // character size in meters
 private const val FACING_OFFSET = 0f      // if he walks sideways/backwards, try 90f, 180f or -90f
 private const val WALK_SPEED = 2.2f
 private const val TURN_SPEED = 540f       // degrees per second he turns toward where he walks
-private const val AIM_TURN_SPEED = 1080f  // degrees per second he turns toward where he aims (faster, so the gun lines up quickly)
-private const val ACCEL = 9f              // how fast he speeds up / slows down (meters per second, per second)
-private const val BLEND_TIME = 0.25f      // seconds to blend between animations (idle/walk/run/shoot)
+private const val AIM_TURN_SPEED = 1080f  // degrees per second he turns toward where he aims
+private const val ACCEL = 9f              // how fast he speeds up / slows down
+private const val BLEND_TIME = 0.25f      // seconds to blend between animations
 private const val BLEND_FLIP = false      // if the blend looks backwards (pops at the end), change to true
 private const val RUN_SPEED = 4.6f
 private const val CAM_DIST = 3.2f         // how far behind him (pinch with two fingers to change)
@@ -130,53 +84,59 @@ private const val ZOOM_MAX = 3f           // farthest (pinch in)
 private const val CAM_DRAG_SPEED = 0.25f  // degrees of camera turn per pixel dragged
 private const val CAM_PITCH_SPEED = 0.2f  // degrees of camera tilt per pixel dragged up/down
 private const val CAM_PITCH_MAX = 55f     // highest the camera can go (degrees above chest level)
-private const val AIM_DEADZONE = 0.15f    // aim stick: pushed less than this = no aim yet (he keeps his direction)
-private const val FIRE_ZONE = 0.7f        // aim stick: pushed past this fraction of the radius = he shoots
+private const val AIM_DEADZONE = 0.15f    // aim stick: pushed less than this = no aim yet
 private const val BACKPEDAL_DOT = -0.2f   // moving against his facing by this much = play the walk backward
 private const val RAD_TO_DEG = 180f / PI.toFloat()
 private const val DEG_TO_RAD = PI.toFloat() / 180f
+
+// ---- Scope ----
+private const val SCOPE_DIST = 0.35f      // camera distance behind him while scoped (small = over the shoulder)
+private const val SCOPE_DRAG = 0.4f       // camera turns slower while scoped (steady aim)
 
 // ---- Bullets ----
 private const val BULLET_COUNT = 24
 private const val BULLET_SPEED = 40f          // meters per second
 private const val BULLET_RANGE = 50f          // bullet disappears after this distance
 private const val FIRE_INTERVAL = 0.12f       // seconds between shots while the fire stick is held
-private const val MUZZLE_FORWARD = 0.5f       // bullet starts this far in front of the HAND (about the gun length)
+private const val MUZZLE_FORWARD = 0.5f       // bullet starts this far in front of the HAND
 private const val AIM_POINT_DIST = 12f        // the bullet aims at the point this far from him along the ring direction
-// Fallback only (used if the hand position cannot be read): start point measured from his body
+private const val BULLET_THICK = 0.035f       // tracer thickness (meters)
+private const val BULLET_LEN = 0.9f           // tracer length (meters). Longer = more like a streak
+private const val FLASH_TIME = 0.06f          // how long the muzzle flash stays (seconds)
+// Fallback only (used if the hand position cannot be read)
 private const val BULLET_HEIGHT = 1.15f
 private const val BULLET_START_FORWARD = 0.9f
-private const val BULLET_START_SIDE = 0.25f   // toward his right hand
+private const val BULLET_START_SIDE = 0.25f
+
+// ---- Hit effects (sparks on walls, blood on fighters) ----
+private const val FX_HALF = 24                // first 24 = sparks, next 24 = blood
+private const val FX_COUNT = 48
 
 // ---- Gun in the right hand ----
 private const val RIGHT_HAND_JOINT = 14          // position of the right hand in the skeleton list
 
-// ---- Bots ----
-// Every bot gets a random gun from GUNS (MP5, AK-47, AR). Add a gun to GUNS and the bots can hold it too.
-
-// ---- Punch and jump (clips live in the character GLB, each 0.5 s) ----
-private const val PUNCH_LEN = 0.5f            // length of punch_1 / punch_2 / punch_3
-private const val PUNCH_CHAIN_AT = 0.3f       // a new tap after this many seconds starts the next punch
+// ---- Punch and jump ----
+private const val PUNCH_LEN = 0.5f
+private const val PUNCH_CHAIN_AT = 0.3f
 private const val JUMP_CLIP = "jump_inplace"
-// ---- Crouch (bend down): the character has no crouch clip, so the deepest squat of the jump clip is held ----
-private const val CROUCH_POSE_T = 0.40f       // moment of "jump_inplace" used as the squat. Try 0.0667 for the other squat.
-private const val CROUCH_SPEED = 1.2f         // walking speed while crouched (normal walk is WALK_SPEED)
+private const val CROUCH_POSE_T = 0.40f
+private const val CROUCH_SPEED = 1.2f
 
-// ---- Shield: a ring-cage bubble around him ----
-private const val SHIELD_RINGS = 4
-private const val SHIELD_SEGS = 16
-private const val SHIELD_R = 1.15f            // bubble radius (meters)
-private const val SHIELD_CY = 0.95f           // bubble centre height
+// ---- Shield: soccer-ball cage (12 pentagons + 20 hexagons = 90 edges) ----
+private const val SHIELD_R = 1.1f             // bubble radius (meters)
+private const val SHIELD_CY = 0.9f            // bubble centre height
+private const val SHIELD_EDGE_THICK = 0.04f   // thickness of each panel edge
 private const val JUMP_LEN = 0.5f
-private const val JUMP_TAKEOFF_T = 0.1406f    // clip time when the feet leave the ground
-private const val JUMP_LAND_T = 0.3594f       // clip time when the feet touch down again
-private const val JUMP_SPEED = 8f             // up speed at takeoff (m/s). Higher = higher jump
-private const val GRAVITY = 24f               // pull down (m/s per second). Higher = faster, snappier jump
+private const val JUMP_TAKEOFF_T = 0.1406f
+private const val JUMP_LAND_T = 0.3594f
+private const val JUMP_SPEED = 8f
+private const val GRAVITY = 24f
 
 // Gun turn (degrees, X/Y/Z)
 internal class GunTurn(val x: Float, val y: Float, val z: Float)
 
 // One gun. pos/scale/grip/carry/aim are the fit numbers for THAT gun (from the gun fit viewer).
+// hasScope = true only for guns that really have a scope (sniper). The HUD scope button only works for those.
 internal class GunDef(
     val name: String,
     val file: String,
@@ -184,10 +144,11 @@ internal class GunDef(
     val scale: Float,
     val grip: Position,        // moves the gun so the grip sits in the hand
     val carry: GunTurn,        // idle / walk / run
-    val aim: Map<String, GunTurn>   // muzzle straight forward while shooting
+    val aim: Map<String, GunTurn>,   // muzzle straight forward while shooting
+    val hasScope: Boolean = false
 )
 
-// ADD NEW GUNS HERE (one entry each)
+// ADD NEW GUNS HERE (one entry each). For a sniper add  hasScope = true  as the last line.
 internal val GUNS = listOf(
     GunDef(
         name = "MP5",
@@ -202,7 +163,6 @@ internal val GUNS = listOf(
             "run_shoot" to GunTurn(-167f, 31f, -37f)
         )
     ),
-    // AK-47: fitted to the character's right hand and checked in all 6 animations (idle, walk, run, shoot, walk_shoot, run_shoot)
     GunDef(
         name = "AK-47",
         file = "ak47_gun.glb",
@@ -216,7 +176,6 @@ internal val GUNS = listOf(
             "run_shoot" to GunTurn(-167f, 31f, -37f)
         )
     ),
-    // AR (M4 style): same method as the AK
     GunDef(
         name = "AR",
         file = "ar_gun.glb",
@@ -229,10 +188,40 @@ internal val GUNS = listOf(
             "walk_shoot" to GunTurn(-142f, 11f, -48f),
             "run_shoot" to GunTurn(-167f, 31f, -37f)
         )
+    ),
+    // NEW: rifle.glb. Fit numbers are copied from the AR for now, so the hold may look a little off until it is fitted.
+    // hasScope = true is a guess (looks like a scoped rifle). Set it to false if it has no scope.
+    GunDef(
+        name = "Rifle",
+        file = "rifle.glb",
+        pos = Position(0.005f, 0.06f, 0.025f),
+        scale = 0.24f,
+        grip = Position(0.049f, 0.191f, 0.394f),
+        carry = GunTurn(-130f, 51f, -37f),
+        aim = mapOf(
+            "shoot" to GunTurn(-148f, 16f, -45f),
+            "walk_shoot" to GunTurn(-142f, 11f, -48f),
+            "run_shoot" to GunTurn(-167f, 31f, -37f)
+        ),
+        hasScope = true
+    ),
+    // NEW: carbine.glb. Same temporary fit numbers as the AR.
+    GunDef(
+        name = "Carbine",
+        file = "carbine.glb",
+        pos = Position(0.005f, 0.06f, 0.025f),
+        scale = 0.24f,
+        grip = Position(0.049f, 0.191f, 0.394f),
+        carry = GunTurn(-130f, 51f, -37f),
+        aim = mapOf(
+            "shoot" to GunTurn(-148f, 16f, -45f),
+            "walk_shoot" to GunTurn(-142f, 11f, -48f),
+            "run_shoot" to GunTurn(-167f, 31f, -37f)
+        )
     )
 )
 
-// ADD NEW ARENAS HERE (index 0 = "Zero Arena" = the default). The index comes from the Arena step of the 3D MODE screens.
+// ADD NEW ARENAS HERE (index 0 = "Zero Arena" = the default).
 internal class ArenaDef(val name: String, val glb: String)
 internal val ARENA_DEFS = listOf(
     ArenaDef("Zero Arena", "arena_play.glb")
@@ -245,36 +234,37 @@ internal val CHAR_NAMES = listOf("Blue", "Red", "Aqua")
 // Plain values the game loop changes every frame (no Compose redraw needed)
 internal class GameInput {
     var x = 0f
-    var y = 0f               // floor height under him (platform / ramp / top of a box he stands on)
+    var y = 0f               // floor height under him
     var z = 0f
     var play: PlayArena? = null   // walls + ramp, filled when arena_play.json is read
     var match: MatchState? = null // Deathmatch / Team Deathmatch (null = no match, only you)
-    var camPitch = 0f        // degrees the camera is raised (drag up/down)
+    var camPitch = 0f
     var camYaw = 0f          // degrees, 0 = looking toward -Z
     var faceDeg = 0f
     var joyX = 0f            // move stick
     var joyY = 0f
-    var shooting = false     // aim stick is pushed into the fire zone
-    var aimHeld = false      // a finger is on the aim stick (aiming, maybe not shooting)
-    var aimX = 0f            // fire stick direction (only used while shooting)
+    var shooting = false
+    var aimHeld = false
+    var aimX = 0f
     var aimY = 0f
     var paused = false
-    var crouch = false        // bent down (HUD crouch button)
+    var crouch = false
     var shieldOn = false      // shield bubble is up (HUD shield button)
-    var handMode = false      // fists mode: gun hidden, no shooting, punch button active
+    var scopeOn = false       // scoped in (HUD scope button, only for guns with hasScope)
+    var handMode = false
     var gunWanted by mutableIntStateOf(0)   // which gun the HUD wants in the hand (index in GUNS)
     var zoom = 1f
     var active = 0
     var lastNanos = 0L
-    var gunOwner = -1        // which character's hand the gun is attached to
-    var gunLoaded = false    // a gun model is loaded and sits in the holder
+    var gunOwner = -1
+    var gunLoaded = false
     var gunDef: GunDef = GUNS[0]
-    val attachFails = IntArray(3)   // gives up after a few tries (no endless retry / log spam)
+    val attachFails = IntArray(3)
     var fireTimer = 0f
-    // where the next bullet leaves from (filled every frame while shooting)
     var mx = 0f
     var my = 0f
     var mz = 0f
+    var flashT = 0f           // muzzle flash timer
     val hand = FloatArray(3)
     val bAlive = BooleanArray(BULLET_COUNT)
     val bx = FloatArray(BULLET_COUNT)
@@ -283,23 +273,31 @@ internal class GameInput {
     val bdx = FloatArray(BULLET_COUNT)
     val bdz = FloatArray(BULLET_COUNT)
     val bDist = FloatArray(BULLET_COUNT)
+    // hit effect particles (sparks 0..23, blood 24..47)
+    val fxLife = FloatArray(FX_COUNT)
+    val fxX = FloatArray(FX_COUNT)
+    val fxY = FloatArray(FX_COUNT)
+    val fxZ = FloatArray(FX_COUNT)
+    val fxVX = FloatArray(FX_COUNT)
+    val fxVY = FloatArray(FX_COUNT)
+    val fxVZ = FloatArray(FX_COUNT)
     // punch combo + jump
     val combo = PunchCombo()
-    var punchClip = ""        // "" = not punching, otherwise punch_1 / punch_2 / punch_3
-    var punchT = 0f           // seconds since this punch started
-    var punchTap = false      // set by the PUNCH button, read once per frame
-    var jumpTap = false       // set by the JUMP button, read once per frame
+    var punchClip = ""
+    var punchT = 0f
+    var punchTap = false
+    var jumpTap = false
     var jumpState = 0         // 0 on the ground, 1 crouching before takeoff, 2 in the air, 3 landing
     var jumpClock = 0f
     var airClock = 0f
-    var jumpClipT = 0f        // which moment of the jump clip to show
-    var jumpH = 0f            // height above the floor
-    var jumpV = 0f            // up speed
+    var jumpClipT = 0f
+    var jumpH = 0f
+    var jumpV = 0f
     val anim = Array(3) { AnimState() }
-    var speed = 0f           // current speed (eases toward the target)
-    var moveX = 0f           // last move direction (kept while slowing down)
+    var speed = 0f
+    var moveX = 0f
     var moveZ = 0f
-    var runMode = false      // run/walk switch with a small gap, so it does not flicker
+    var runMode = false
 }
 
 // Where one character is in its animations (used for the blend)
@@ -310,8 +308,8 @@ internal class AnimState {
     var prevTime = 0f
     var fade = 1f
     var wantName = ""
-    var baseTime = 0f         // time of the idle/walk/run layer under a punch
-    var prevClamp = false     // the fading-out clip is a one-shot (punch / jump): hold its last pose, do not loop it
+    var baseTime = 0f
+    var prevClamp = false
 }
 
 // Everything that is drawn for ONE bot: the character copy, its gun, the marker over the head and the health bar
@@ -320,7 +318,7 @@ internal class BotView(
     val gun: Node,
     val marker: CubeNode,
     val bar: CubeNode,
-    val gunIdx: Int          // which gun in GUNS this bot holds
+    val gunIdx: Int
 ) {
     val anim = AnimState()
     var gunLoaded = false
@@ -328,6 +326,62 @@ internal class BotView(
     var fails = 0
 }
 
+// ---------------- Shield shape: truncated icosahedron (soccer ball) ----------------
+// 60 corners, 90 edges. Every edge is one thin glowing bar, so the bubble looks like a hexagon honeycomb cage.
+private class ShieldGeo(val count: Int, val mid: FloatArray, val quat: Array<Quaternion>, val len: Float)
+
+private val SHIELD_GEO: ShieldGeo by lazy { buildShieldGeo() }
+
+private fun buildShieldGeo(): ShieldGeo {
+    val phi = (1f + sqrt(5f)) / 2f
+    val bases = listOf(
+        floatArrayOf(0f, 1f, 3f * phi),
+        floatArrayOf(1f, 2f + phi, 2f * phi),
+        floatArrayOf(phi, 2f, 2f * phi + 1f)
+    )
+    val pts = ArrayList<FloatArray>()
+    for (b in bases) {
+        for (sx in intArrayOf(-1, 1)) for (sy in intArrayOf(-1, 1)) for (sz in intArrayOf(-1, 1)) {
+            if (b[0] == 0f && sx == -1) continue           // 0 has no sign: do not make the same corner twice
+            val x = b[0] * sx
+            val y = b[1] * sy
+            val z = b[2] * sz
+            pts.add(floatArrayOf(x, y, z))                 // even (cyclic) permutations only
+            pts.add(floatArrayOf(y, z, x))
+            pts.add(floatArrayOf(z, x, y))
+        }
+    }
+    val p0 = pts[0]
+    val radius = sqrt(p0[0] * p0[0] + p0[1] * p0[1] + p0[2] * p0[2])
+    val s = SHIELD_R / radius
+    val mids = ArrayList<Float>()
+    val quats = ArrayList<Quaternion>()
+    for (i in pts.indices) for (j in i + 1 until pts.size) {
+        val a = pts[i]
+        val b = pts[j]
+        val dx = b[0] - a[0]
+        val dy = b[1] - a[1]
+        val dz = b[2] - a[2]
+        val d = sqrt(dx * dx + dy * dy + dz * dz)
+        if (d < 1.9f || d > 2.1f) continue                 // neighbours are exactly 2 apart
+        mids.add((a[0] + b[0]) / 2f * s)
+        mids.add((a[1] + b[1]) / 2f * s)
+        mids.add((a[2] + b[2]) / 2f * s)
+        quats.add(quatFromZ(dx / d, dy / d, dz / d))
+    }
+    return ShieldGeo(quats.size, mids.toFloatArray(), quats.toTypedArray(), 2f * s * 1.04f)
+}
+
+// Turns the Z axis (0,0,1) toward the unit direction (dx, dy, dz)
+private fun quatFromZ(dx: Float, dy: Float, dz: Float): Quaternion {
+    if (dz > 0.9999f) return Quaternion(0f, 0f, 0f, 1f)
+    if (dz < -0.9999f) return Quaternion(1f, 0f, 0f, 0f)
+    val w = 1f + dz
+    val x = -dy
+    val y = dx
+    val n = sqrt(x * x + y * y + w * w)
+    return Quaternion(x / n, y / n, 0f, w / n)
+}
 
 // Names for the pick screens in Game3DHub (so the lists live in one place)
 internal fun characterNames(): List<String> = CHAR_NAMES
@@ -367,32 +421,53 @@ internal fun Game3DView(
     val gun = remember { Node(engine).apply { isVisible = false } }
     var gunModel by remember { mutableStateOf<ModelNode?>(null) }
 
+    // Your bullets: long glowing tracers (hot orange-yellow)
     val bullets = remember {
-        val bulletMat = materialLoader.createColorInstance(Color(0xFFFFE066))
+        val bulletMat = materialLoader.createColorInstance(Color(0xFFFFB02E))
         List(BULLET_COUNT) {
-            CubeNode(engine, size = Float3(0.06f, 0.06f, 0.4f), materialInstance = bulletMat)
+            CubeNode(engine, size = Float3(BULLET_THICK, BULLET_THICK, BULLET_LEN), materialInstance = bulletMat)
                 .apply { isVisible = false }
         }
     }
 
-    // Bot bullets (orange-red, so you can tell them from yours)
+    // Bot bullets (red-orange, so you can tell them from yours)
     val botBullets = remember {
-        val mat = materialLoader.createColorInstance(Color(0xFFFF5A3C))
+        val mat = materialLoader.createColorInstance(Color(0xFFFF4A2C))
         List(BOT_BULLET_COUNT) {
-            CubeNode(engine, size = Float3(0.06f, 0.06f, 0.4f), materialInstance = mat)
+            CubeNode(engine, size = Float3(BULLET_THICK, BULLET_THICK, BULLET_LEN), materialInstance = mat)
                 .apply { isVisible = false }
         }
+    }
+
+    // Muzzle flash at the gun
+    val muzzleFlash = remember {
+        val mat = materialLoader.createColorInstance(Color(0xFFFFD35A))
+        CubeNode(engine, size = Float3(0.16f, 0.16f, 0.16f), materialInstance = mat).apply { isVisible = false }
+    }
+
+    // Hit effects: 24 sparks (wall hits) + 24 blood drops (fighter hits)
+    val fxNodes = remember {
+        val spark = materialLoader.createColorInstance(Color(0xFFFFC040))
+        val blood = materialLoader.createColorInstance(Color(0xFFB3121B))
+        List(FX_COUNT) { i ->
+            if (i < FX_HALF) CubeNode(engine, size = Float3(0.05f, 0.05f, 0.05f), materialInstance = spark)
+            else CubeNode(engine, size = Float3(0.07f, 0.07f, 0.07f), materialInstance = blood)
+        }.also { l -> l.forEach { it.isVisible = false } }
     }
 
     // The bots that are drawn (filled after the arena and your character are loaded)
     val botViews = remember { mutableListOf<BotView>() }
 
-    // Shield: thin glowing rings around him (hidden until the shield button is on)
+    // Shield: hexagon/pentagon cage bubble (hidden until the shield button is on). Each bar is turned once, here.
     val shieldNodes = remember {
+        val geo = SHIELD_GEO
         val mat = materialLoader.createColorInstance(Color(0xFF35D3FF))
-        List(SHIELD_RINGS * SHIELD_SEGS) {
-            CubeNode(engine, size = Float3(0.05f, 0.05f, 0.38f), materialInstance = mat)
-                .apply { isVisible = false }
+        List(geo.count) { i ->
+            CubeNode(engine, size = Float3(SHIELD_EDGE_THICK, SHIELD_EDGE_THICK, geo.len), materialInstance = mat)
+                .apply {
+                    quaternion = geo.quat[i]
+                    isVisible = false
+                }
         }
     }
 
@@ -401,6 +476,8 @@ internal fun Game3DView(
         addAll(bullets)
         addAll(botBullets)
         addAll(shieldNodes)
+        add(muzzleFlash)
+        addAll(fxNodes)
     }
 
     // 1) arena, 2) character. One step at a time so nothing freezes.
@@ -531,7 +608,7 @@ internal fun Game3DView(
             childNodes = nodes,
             environment = environment,
             onFrame = { nanos ->
-                stepGame(nanos, rig, models, cameraNode, engine, gun, bullets, shieldNodes, botViews, botBullets)
+                stepGame(nanos, rig, models, cameraNode, engine, gun, bullets, shieldNodes, botViews, botBullets, muzzleFlash, fxNodes)
             }
         )
 
@@ -567,8 +644,9 @@ internal fun Game3DView(
                                 lastSpread = 0f
                                 lastAngle = Float.NaN
                                 val c = pressed[0]
-                                rig.camYaw += (c.position.x - c.previousPosition.x) * CAM_DRAG_SPEED
-                                rig.camPitch = (rig.camPitch + (c.position.y - c.previousPosition.y) * CAM_PITCH_SPEED)
+                                val sens = if (rig.scopeOn) SCOPE_DRAG else 1f     // steadier while scoped
+                                rig.camYaw += (c.position.x - c.previousPosition.x) * CAM_DRAG_SPEED * sens
+                                rig.camPitch = (rig.camPitch + (c.position.y - c.previousPosition.y) * CAM_PITCH_SPEED * sens)
                                     .coerceIn(0f, CAM_PITCH_MAX)
                             }
                             event.changes.forEach { it.consume() }
@@ -595,12 +673,14 @@ private fun stepGame(
     bullets: List<CubeNode>,
     shieldNodes: List<CubeNode>,
     botViews: List<BotView>,
-    botBullets: List<CubeNode>
+    botBullets: List<CubeNode>,
+    muzzleFlash: CubeNode,
+    fxNodes: List<CubeNode>
 ) {
     // Paused: freeze everything (the camera stays where it is)
     if (rig.paused) { rig.lastNanos = nanos; return }
     // fists mode: no aiming, no shooting
-    if (rig.handMode) { rig.shooting = false; rig.aimHeld = false }
+    if (rig.handMode) { rig.shooting = false; rig.aimHeld = false; rig.scopeOn = false }
 
     val dt = if (rig.lastNanos == 0L) 0f else ((nanos - rig.lastNanos) / 1_000_000_000f).coerceIn(0f, 0.05f)
     rig.lastNanos = nanos
@@ -618,6 +698,7 @@ private fun stepGame(
         rig.punchTap = false
         rig.jumpTap = false
         rig.punchClip = ""
+        rig.scopeOn = false
     }
 
     // ---- Jump: crouch -> up and down with real height -> landing ----
@@ -643,7 +724,6 @@ private fun stepGame(
             rig.jumpV -= GRAVITY * dt
             rig.jumpH += rig.jumpV * dt
             rig.airClock += dt
-            // the clip's "in the air" part is stretched to match how long this jump really lasts
             val u = min(1f, rig.airClock / (2f * JUMP_SPEED / GRAVITY))
             rig.jumpClipT = JUMP_TAKEOFF_T + (JUMP_LAND_T - JUMP_TAKEOFF_T) * u
             if (rig.jumpH <= 0f && rig.jumpV < 0f) {
@@ -658,7 +738,7 @@ private fun stepGame(
         }
     }
 
-    // ---- Punch combo: each tap starts the next punch (right, left, low, right ...) ----
+    // ---- Punch combo ----
     if (rig.punchTap) {
         rig.punchTap = false
         if (rig.jumpState == 0 && (rig.punchClip.isEmpty() || rig.punchT >= PUNCH_CHAIN_AT)) {
@@ -679,7 +759,6 @@ private fun stepGame(
 
     val mag = min(1f, hypot(rig.joyX, rig.joyY))
     val moving = mag > 0.1f
-    // walk -> run switch has a gap, so it does not flicker at the edge
     if (rig.runMode) { if (mag < 0.6f) rig.runMode = false } else { if (mag > 0.75f) rig.runMode = true }
     var dx = 0f
     var dz = 0f
@@ -692,33 +771,23 @@ private fun stepGame(
         rig.moveZ = dz
     }
 
-    // Speed eases up and down (no instant jump between stand / walk / run)
-    // (the low punch roots him to the spot)
-    val targetSpeed = if (!moving || rig.punchClip == "punch_3") 0f else if (rig.crouch) CROUCH_SPEED else if (rig.runMode) RUN_SPEED else WALK_SPEED
+    val targetSpeed = if (!moving || rig.punchClip == "punch_3") 0f else if (rig.crouch || rig.scopeOn) CROUCH_SPEED else if (rig.runMode) RUN_SPEED else WALK_SPEED
     val maxChange = ACCEL * dt
     rig.speed += (targetSpeed - rig.speed).coerceIn(-maxChange, maxChange)
 
-    // Move, with sliding along walls (rules copied from the HTML)
-    // Walking only uses the move stick. Aiming / shooting never changes x, y or z.
     val play = rig.play
     if (play != null) {
-        // how high his feet are right now. Low things (sandbags, barrels) do not block him
-        // when his feet are above their top, so he can jump over them or land on them.
         val feet = rig.y + rig.jumpH
         val nx = rig.x + rig.moveX * rig.speed * dt
         val nz = rig.z + rig.moveZ * rig.speed * dt
         play.tryMove(rig.x, rig.z, nx, nz, feet)
         rig.x = play.outX
         rig.z = play.outZ
-        // go up / down the ramp smoothly
         val oldY = rig.y
         rig.y += (play.groundY(rig.x, rig.z, feet) - rig.y) * min(1f, dt * 20f)
-        // in the air, a changing floor must not push him up or down by itself
         if (rig.jumpState == 2) rig.jumpH -= (rig.y - oldY)
     }
 
-    // Where the aim stick points (relative to the camera). He turns to it whenever a finger is on the stick
-    // and it is pushed past the dead zone (shooting or not).
     val aimMag = min(1f, hypot(rig.aimX, rig.aimY))
     val aiming = rig.aimHeld && aimMag > AIM_DEADZONE
     var tx = dx
@@ -732,10 +801,7 @@ private fun stepGame(
         wantTurn = true
     }
 
-    // Turn smoothly: toward the aim while shooting, otherwise toward where he walks.
-    // (standing still and not aiming: keeps his last direction)
     if (wantTurn) {
-        // the model faces +X, so turn +X toward (tx, tz)
         val target = atan2(-tz, tx) * RAD_TO_DEG + FACING_OFFSET
         var diff = target - rig.faceDeg
         while (diff > 180f) diff -= 360f
@@ -744,38 +810,32 @@ private fun stepGame(
         rig.faceDeg += diff.coerceIn(-maxTurn, maxTurn)
     }
 
-    // The way he is facing right now (= the way the gun points on screen).
     val faceR = (rig.faceDeg - FACING_OFFSET) * DEG_TO_RAD
     val sx = cos(faceR)
     val sz = -sin(faceR)
 
-    // The way the aim ring points (the real shooting direction). Same as his facing when he is not aiming.
     val aimDirX = if (aiming) tx else sx
     val aimDirZ = if (aiming) tz else sz
 
-    // Pick the animation from the real speed
     val base = if (rig.speed < 0.15f) "idle" else if (rig.speed > (WALK_SPEED + RUN_SPEED) / 2f) "run" else "walk"
     val shootWant = if (rig.shooting) (if (base == "idle") "shoot" else base + "_shoot") else base
     val want = when {
         rig.jumpState != 0 -> JUMP_CLIP
         rig.punchClip.isNotEmpty() -> rig.punchClip
-        rig.crouch -> JUMP_CLIP          // bent down: hold the squat pose
+        rig.crouch -> JUMP_CLIP
         else -> shootWant
     }
-    // jump and punch are played at an exact moment of the clip (not by the clock)
     val forceTime = if (rig.jumpState != 0) rig.jumpClipT else if (rig.punchClip.isNotEmpty()) rig.punchT else if (rig.crouch) CROUCH_POSE_T else -1f
-    // punch_1 / punch_2 only move the upper body, so the legs keep walking/running underneath
     val layerBase = if (want == "punch_1" || want == "punch_2") base else ""
 
-    // Moving against the way he faces (walking backward while shooting forward): play the walk in reverse
     val moveDot = sx * rig.moveX + sz * rig.moveZ
     val timeScale = if (rig.speed > 0.15f && moveDot < BACKPEDAL_DOT) -1f else 1f
 
-    // Only characters that are already loaded are touched
+    // When scoped the camera sits at his shoulder, so his body is hidden (you look through the scope)
     for (i in models.indices) {
         val m = models[i] ?: continue
         val on = i == rig.active
-        m.isVisible = on && !dead
+        m.isVisible = on && !dead && !rig.scopeOn
         if (on) {
             m.position = Position(rig.x, rig.y + rig.jumpH, rig.z)
             m.rotation = Rotation(y = rig.faceDeg)
@@ -783,8 +843,6 @@ private fun stepGame(
         }
     }
 
-    // Gun: attach to the active character's right hand (only after both are loaded),
-    // turn it for the current animation
     val activeModel = models[rig.active]
     if (rig.gunLoaded && activeModel != null &&
         rig.gunOwner != rig.active && rig.attachFails[rig.active] < 10
@@ -792,16 +850,13 @@ private fun stepGame(
         if (attachGun(engine, gun, activeModel)) rig.gunOwner = rig.active
         else rig.attachFails[rig.active]++
     }
-    // the gun is put away while he punches (and while he is eliminated)
-    gun.isVisible = rig.gunLoaded && activeModel != null && rig.gunOwner == rig.active && rig.punchClip.isEmpty() && !rig.handMode && !dead
+    gun.isVisible = rig.gunLoaded && activeModel != null && rig.gunOwner == rig.active && rig.punchClip.isEmpty() && !rig.handMode && !dead && !rig.scopeOn
     val def = rig.gunDef
     val turn = def.aim[want] ?: def.carry
     gun.position = def.pos
     gun.quaternion = quatXYZ(turn.x, turn.y, turn.z)
     gun.scale = Float3(def.scale, def.scale, def.scale)
 
-    // Where bullets leave: the real right hand position (after the animation was applied), pushed forward
-    // along the gun direction. If the hand cannot be read, falls back to a point measured from his body.
     if (rig.shooting) {
         if (activeModel != null && rig.gunLoaded && handWorld(engine, activeModel, rig.hand)) {
             rig.mx = rig.hand[0] + sx * MUZZLE_FORWARD
@@ -814,8 +869,6 @@ private fun stepGame(
         }
     }
 
-    // The bullet flies from the gun toward the point the ring is aimed at, so it goes where you aim,
-    // not where his body happens to be turned (the body turns a little later and the hand is to the side).
     var bdirX = aimDirX
     var bdirZ = aimDirZ
     if (rig.shooting) {
@@ -827,25 +880,40 @@ private fun stepGame(
     updateBullets(dt, rig, bullets, bdirX, bdirZ)
     updateShield(rig, shieldNodes, nanos)
 
+    // Muzzle flash: a small bright burst at the gun for a few frames after each shot
+    if (rig.flashT > 0f && !dead) {
+        rig.flashT -= dt
+        val s = 0.8f + Random.nextFloat() * 0.8f
+        muzzleFlash.position = Position(rig.mx + bdirX * 0.15f, rig.my, rig.mz + bdirZ * 0.15f)
+        muzzleFlash.rotation = Rotation(Random.nextFloat() * 90f, Random.nextFloat() * 90f, Random.nextFloat() * 90f)
+        muzzleFlash.scale = Float3(s, s, s)
+        muzzleFlash.isVisible = true
+    } else if (muzzleFlash.isVisible) {
+        muzzleFlash.isVisible = false
+    }
+
     // Deathmatch / Team Deathmatch: bots think, shoot, die, respawn. Then they are drawn.
     if (mt != null) {
         mt.update(dt, rig)
         stepBots(dt, rig, mt, botViews, botBullets, engine)
+        // hit spots collected by the match logic -> sparks (wall) or blood (fighter)
+        for (h in mt.hitFx) spawnBurst(rig, h[0], h[1], h[2], h[3].toInt(), if (h[3] > 0.5f) 7 else 5)
+        mt.hitFx.clear()
         if (mt.over) rig.paused = true      // match finished: freeze the game, the HUD shows the result
     }
+    updateFx(dt, rig, fxNodes)
 
-    // Chest-level follow camera (distance = pinch zoom, direction = drag)
-    val dist = CAM_DIST * rig.zoom
+    // Follow camera. Normal: behind him (distance = pinch zoom). Scoped: at his shoulder.
+    val dist = if (rig.scopeOn) SCOPE_DIST else CAM_DIST * rig.zoom
     val pr = rig.camPitch * DEG_TO_RAD
     val back = dist * cos(pr)
-    val camY = rig.y + rig.jumpH * 0.4f      // the camera follows a jump only a little (less shake)
+    val camY = rig.y + rig.jumpH * 0.4f
     cameraNode.position = Position(rig.x - fx * back, camY + CAM_HEIGHT + dist * sin(pr), rig.z - fz * back)
     cameraNode.lookAt(Position(rig.x + fx * CAM_LOOK_AHEAD, camY + CAM_LOOK_Y, rig.z + fz * CAM_LOOK_AHEAD))
 }
 
 // ---------------- Bots ----------------
 
-// Puts every bot where the match logic says it is, plays its animation, holds its gun, and draws the bot bullets.
 private fun stepBots(
     dt: Float,
     rig: GameInput,
@@ -903,10 +971,6 @@ private fun animIndex(animator: Animator, name: String): Int {
     return -1
 }
 
-// Plays the wanted animation and blends from the old one (BLEND_TIME seconds).
-// timeScale = -1 plays the cycle backward (used for walking backward while shooting forward).
-// forceTime >= 0 shows that exact moment of the clip (punch / jump). layerBase = name of a clip (idle/walk/run) that is
-// applied first, so a upper-body-only punch keeps the legs moving.
 private fun isOneShot(name: String) = name.startsWith("punch") || name.startsWith("jump")
 
 private fun driveAnimation(
@@ -925,7 +989,6 @@ private fun driveAnimation(
                 st.prevTime = st.curTime
                 val pd = animator.getAnimationDuration(st.prev)
                 val nd = animator.getAnimationDuration(idx)
-                // keep the same point in the step cycle (walk <-> run looks smooth)
                 st.curTime = if (pd > 0f) st.prevTime / pd * nd else 0f
                 st.fade = 0f
             }
@@ -968,27 +1031,24 @@ private fun driveAnimation(
 
 // ---------------- Shield ----------------
 
+// Moves the 90 edge bars of the cage around him (they were already turned when they were made).
 private fun updateShield(rig: GameInput, nodes: List<CubeNode>, nanos: Long) {
     if (!rig.shieldOn || rig.match?.playerDead == true) {
         for (n in nodes) if (n.isVisible) n.isVisible = false
         return
     }
+    val g = SHIELD_GEO
     val t = nanos / 1_000_000_000f
-    val pulse = 1f + 0.03f * sin(t * 6f)
-    val baseY = rig.y + rig.jumpH
-    var i = 0
-    for (ring in 0 until SHIELD_RINGS) {
-        val dy = SHIELD_R * (-0.7f + ring * (1.4f / (SHIELD_RINGS - 1)))
-        val r = sqrt(SHIELD_R * SHIELD_R - dy * dy) * pulse
-        val spin = t * 40f * (if (ring % 2 == 0) 1f else -1f)      // rings turn slowly (degrees)
-        for (s in 0 until SHIELD_SEGS) {
-            val deg = spin + s * 360f / SHIELD_SEGS
-            val rad = deg * DEG_TO_RAD
-            val n = nodes[i++]
-            n.position = Position(rig.x + r * cos(rad), baseY + SHIELD_CY + dy, rig.z + r * sin(rad))
-            n.rotation = Rotation(y = -deg)
-            n.isVisible = true
-        }
+    val pulse = 1f + 0.025f * sin(t * 5f)                 // the bubble breathes a little
+    val cy = rig.y + rig.jumpH + SHIELD_CY
+    for (i in nodes.indices) {
+        val n = nodes[i]
+        n.position = Position(
+            rig.x + g.mid[i * 3] * pulse,
+            cy + g.mid[i * 3 + 1] * pulse,
+            rig.z + g.mid[i * 3 + 2] * pulse
+        )
+        if (!n.isVisible) n.isVisible = true
     }
 }
 
@@ -1010,6 +1070,7 @@ private fun updateBullets(dt: Float, rig: GameInput, bullets: List<CubeNode>, fx
             rig.bDist[i] = 0f
             bullets[i].rotation = Rotation(y = atan2(fx, fz) * RAD_TO_DEG)
             rig.fireTimer = FIRE_INTERVAL
+            rig.flashT = FLASH_TIME                     // muzzle flash for this shot
         }
     }
     val mt = rig.match
@@ -1020,10 +1081,12 @@ private fun updateBullets(dt: Float, rig: GameInput, bullets: List<CubeNode>, fx
             val step = min(0.25f, left)          // small steps so thin walls can't be skipped
             val nx = rig.bx[i] + rig.bdx[i] * step
             val nz = rig.bz[i] + rig.bdz[i] * step
-            if ((rig.play?.bulletHits(nx, rig.by[i], nz) ?: false) || rig.bDist[i] > BULLET_RANGE) {
+            val wall = rig.play?.bulletHits(nx, rig.by[i], nz) ?: false
+            if (wall || rig.bDist[i] > BULLET_RANGE) {
+                if (wall) spawnBurst(rig, rig.bx[i], rig.by[i], rig.bz[i], 0, 5)   // sparks on the wall
                 rig.bAlive[i] = false
             } else if (mt != null && mt.bulletStep(nx, rig.by[i], nz, 0, rig)) {
-                rig.bAlive[i] = false            // hit a bot (id 0 = you is the owner)
+                rig.bAlive[i] = false            // hit a bot (blood is added by the match logic)
             } else {
                 rig.bx[i] = nx
                 rig.bz[i] = nz
@@ -1036,10 +1099,46 @@ private fun updateBullets(dt: Float, rig: GameInput, bullets: List<CubeNode>, fx
     }
 }
 
+// ---------------- Hit effects ----------------
+
+// kind 0 = orange sparks (wall), kind 1 = blood (fighter). n = how many pieces fly out.
+private fun spawnBurst(rig: GameInput, x: Float, y: Float, z: Float, kind: Int, n: Int) {
+    val from = if (kind == 1) FX_HALF else 0
+    val to = if (kind == 1) FX_COUNT else FX_HALF
+    var made = 0
+    for (i in from until to) {
+        if (made >= n) break
+        if (rig.fxLife[i] > 0f) continue
+        made++
+        val a = Random.nextFloat() * 2f * PI.toFloat()
+        val sp = if (kind == 1) 1.5f + Random.nextFloat() * 2.5f else 2f + Random.nextFloat() * 3.5f
+        rig.fxX[i] = x
+        rig.fxY[i] = y
+        rig.fxZ[i] = z
+        rig.fxVX[i] = cos(a) * sp
+        rig.fxVZ[i] = sin(a) * sp
+        rig.fxVY[i] = 1f + Random.nextFloat() * 3f
+        rig.fxLife[i] = (if (kind == 1) 0.45f else 0.25f) + Random.nextFloat() * 0.2f
+    }
+}
+
+private fun updateFx(dt: Float, rig: GameInput, nodes: List<CubeNode>) {
+    for (i in 0 until FX_COUNT) {
+        val n = nodes[i]
+        if (rig.fxLife[i] <= 0f) { if (n.isVisible) n.isVisible = false; continue }
+        rig.fxLife[i] -= dt
+        rig.fxVY[i] -= 9f * dt                      // pieces fall
+        rig.fxX[i] += rig.fxVX[i] * dt
+        rig.fxY[i] += rig.fxVY[i] * dt
+        rig.fxZ[i] += rig.fxVZ[i] * dt
+        if (rig.fxLife[i] <= 0f) { n.isVisible = false; continue }
+        n.position = Position(rig.fxX[i], rig.fxY[i], rig.fxZ[i])
+        n.isVisible = true
+    }
+}
+
 // ---------------- Gun helpers ----------------
 
-// Puts the gun holder under the right hand bone of this character.
-// (If the build fails or the gun does not follow the hand, this is the function to check.)
 private fun attachGun(engine: Engine, gun: Node, model: ModelNode): Boolean {
     return try {
         val joints = model.modelInstance.getJointsAt(0)
@@ -1053,8 +1152,6 @@ private fun attachGun(engine: Engine, gun: Node, model: ModelNode): Boolean {
     }
 }
 
-// Reads where the right hand is in the world right now (x, y, z into out[0..2]).
-// Filament stores the matrix column by column, so the position is at 12, 13, 14.
 private val handMatrix = FloatArray(16)
 private fun handWorld(engine: Engine, model: ModelNode, out: FloatArray): Boolean {
     return try {
@@ -1071,7 +1168,6 @@ private fun handWorld(engine: Engine, model: ModelNode, out: FloatArray): Boolea
     }
 }
 
-// Same turn order as the viewer (X, then Y, then Z), so the numbers match what you saw
 private fun quatXYZ(xDeg: Float, yDeg: Float, zDeg: Float): Quaternion {
     fun axis(deg: Float, ax: Float, ay: Float, az: Float): Quaternion {
         val h = deg * DEG_TO_RAD / 2f
