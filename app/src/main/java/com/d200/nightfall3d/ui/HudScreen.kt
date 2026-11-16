@@ -48,7 +48,7 @@ import kotlin.math.roundToInt
 //   walk stick  -> move
 //   fire ring   -> aim + shoot (gun mode)   |   big fist button -> punch (hand mode)
 //   jump        -> jump
-//   Switch / Gun / Hand Fight -> gun mode or hand mode (fists: gun hidden, only punch / jump / crouch)
+//   Switch (round button beside the fire ring) -> gun mode or hand mode (fists: gun hidden, only punch / jump / crouch)
 //   weapon list -> which gun is in the hand
 //
 // One size system, so nothing looks random:
@@ -240,56 +240,6 @@ private fun Stick(
     }
 }
 
-@Composable
-private fun SelRow(
-    k: Float,
-    label: String,
-    glyph: Glyph,
-    selected: Boolean,
-    chevron: Boolean,
-    onClick: () -> Unit
-) {
-    val shape = RoundedCornerShape((4 * k).dp)
-    Row(
-        Modifier
-            .fillMaxWidth()
-            .height((60 * k).dp)
-            .background(if (selected) Color(0x33FF8A00) else Color.Transparent, shape)
-            .then(if (selected) Modifier.border((2 * k).dp, Orange, shape) else Modifier)
-            .clickable { onClick() },
-        verticalAlignment = Alignment.CenterVertically
-    ) {
-        Box(
-            Modifier.padding(start = (14 * k).dp).sized(k, 46f, 36f),
-            contentAlignment = Alignment.Center
-        ) {
-            val wide = glyph == Glyph.RIFLE
-            GlyphIcon(
-                glyph,
-                Modifier.sized(k, if (wide) 46f else 34f, if (wide) 18f else 34f),
-                main = if (selected) Orange else Color.White,
-                accent = if (selected) Color.White else Orange,
-                cut = if (selected) Color(0xFF2A1A0C) else CutColor
-            )
-        }
-        Spacer(Modifier.width((12 * k).dp))
-        NfText(
-            label,
-            Modifier.weight(1f),
-            size = fsz(k, 27f),
-            bold = true,
-            color = if (selected) Orange else Color.White
-        )
-        if (chevron) {
-            GlyphIcon(
-                Glyph.CHEVRON,
-                Modifier.padding(end = (12 * k).dp).size((22 * k).dp),
-                main = if (selected) Orange else Color(0x88FFFFFF)
-            )
-        }
-    }
-}
-
 /** Small dark pill with a count, sits on the corner of a round button. */
 @Composable
 private fun CountBadge(k: Float, modifier: Modifier, text: String) {
@@ -345,6 +295,9 @@ fun HudScreen(api: GameApi, onExit: () -> Unit) {
         if (handMode) listOf("Fists") + melees.map { it.name } else gunList
     val selected = if (handMode) meleeIdx + 1 else gunIdx
     val currentName = options.getOrNull(selected) ?: "No weapon"
+
+    // Players who have joined this match. Offline test = only you. It will count real players later.
+    val playersJoined = 1
 
     // The squad list is not shown here. It will appear when real players are in the match.
 
@@ -406,37 +359,9 @@ fun HudScreen(api: GameApi, onExit: () -> Unit) {
             GlyphButton(k, atTL(k, 343f, 84f), TOP, Glyph.EMOJI, 0.52f)
             GlyphButton(k, atTL(k, 260f, 161f), TOP, Glyph.CHAT, 0.52f)
 
-            // ---------------- top right: currency (landscape), players, kills, settings
-            // All four boxes use the same dark glass. Only the small icon carries colour.
+            // ---------------- top right: players joined, kills, settings
+            // All boxes use the same dark glass. Only the small icon carries colour.
             val infoShape = RoundedCornerShape((5 * k).dp)
-            if (landscape) {
-                Row(
-                    edgeTR(k, 444f, 10f)
-                        .height((46 * k).dp)
-                        .clip(infoShape)
-                        .background(Glass)
-                        .border((1.5f * k).dp, Color(0x44FFFFFF), infoShape)
-                        .padding(horizontal = (10 * k).dp),
-                    verticalAlignment = Alignment.CenterVertically
-                ) {
-                    GlyphIcon(Glyph.COIN, Modifier.sized(k, 34f, 34f))
-                    Spacer(Modifier.width((8 * k).dp))
-                    NfText(formatNum(p.coins) + " +", size = fsz(k, 26f), bold = true)
-                }
-                Row(
-                    edgeTR(k, 297f, 10f)
-                        .height((46 * k).dp)
-                        .clip(infoShape)
-                        .background(Glass)
-                        .border((1.5f * k).dp, Color(0x44FFFFFF), infoShape)
-                        .padding(horizontal = (10 * k).dp),
-                    verticalAlignment = Alignment.CenterVertically
-                ) {
-                    GlyphIcon(Glyph.GEM, Modifier.sized(k, 34f, 34f))
-                    Spacer(Modifier.width((8 * k).dp))
-                    NfText(formatNum(p.diamonds) + " +", size = fsz(k, 26f), bold = true)
-                }
-            }
             Row(
                 edgeTR(k, 172f, 10f)
                     .height((46 * k).dp)
@@ -448,7 +373,7 @@ fun HudScreen(api: GameApi, onExit: () -> Unit) {
             ) {
                 GlyphIcon(Glyph.PLAYERS, Modifier.sized(k, 32f, 32f), main = Color(0xFF35D3FF))
                 Spacer(Modifier.width((8 * k).dp))
-                NfText("32", size = fsz(k, 27f), bold = true)
+                NfText("$playersJoined", size = fsz(k, 27f), bold = true)
             }
             Row(
                 edgeTR(k, 60f, 10f)
@@ -469,7 +394,7 @@ fun HudScreen(api: GameApi, onExit: () -> Unit) {
                 edgeTR(k, 6f, 8f).sized(k, 46f, 46f).clickable { onExit() }
             )
 
-            // ---------------- weapon panel + slots + Switch + Gun / Hand Fight / Combat
+            // ---------------- weapon panel (tap it to pick a weapon)
             val panelShape = CutCornerShape(topEnd = (14 * k).dp)
             Box(
                 atTR(k, 1383f, 65f, 275f)
@@ -508,100 +433,12 @@ fun HudScreen(api: GameApi, onExit: () -> Unit) {
                 )
             }
 
-            val slotShape = RoundedCornerShape((4 * k).dp)
-            Box(
-                atTR(k, 1383f, 170f, 92f)
-                    .sized(k, 92f, 98f)
-                    .clip(slotShape)
-                    .background(Glass)
-                    .border((1.5f * k).dp, if (!handMode) Orange else Color(0x44FFFFFF), slotShape)
-                    .clickable { setHand(false) }
-            ) {
-                GlyphIcon(
-                    Glyph.PISTOL,
-                    Modifier.align(Alignment.TopCenter).padding(top = (12 * k).dp).sized(k, 56f, 40f)
-                )
-                NfText(
-                    "15/60",
-                    Modifier.align(Alignment.BottomStart).padding(start = (10 * k).dp, bottom = (14 * k).dp),
-                    size = fsz(k, 20f),
-                    bold = true
-                )
-                Box(
-                    Modifier
-                        .align(Alignment.BottomStart)
-                        .padding(start = (10 * k).dp, bottom = (8 * k).dp)
-                        .width((70 * k).dp)
-                        .height((3 * k).dp)
-                        .background(Color(0x99FFFFFF))
-                )
-            }
-            Box(
-                atTR(k, 1477f, 170f, 88f)
-                    .sized(k, 88f, 98f)
-                    .clip(slotShape)
-                    .background(Glass)
-                    .border((1.5f * k).dp, Color(0x44FFFFFF), slotShape)
-            )
-            // the hand icon: tap it to go into punch mode
-            Box(
-                atTR(k, 1568f, 170f, 90f)
-                    .sized(k, 90f, 98f)
-                    .clip(slotShape)
-                    .background(Glass)
-                    .border((1.5f * k).dp, if (handMode) Orange else Color(0x44FFFFFF), slotShape)
-                    .clickable { setHand(true) }
-            ) {
-                GlyphIcon(
-                    Glyph.FIST,
-                    Modifier.align(Alignment.TopCenter).padding(top = (10 * k).dp).sized(k, 52f, 52f)
-                )
-                NfText(
-                    "\u221E",
-                    Modifier.align(Alignment.BottomCenter).padding(bottom = (8 * k).dp),
-                    size = fsz(k, 28f),
-                    bold = true
-                )
-            }
-
-            val switchShape = RoundedCornerShape((4 * k).dp)
-            Box(
-                atTR(k, 1502f, 278f, 156f)
-                    .sized(k, 156f, 54f)
-                    .clip(switchShape)
-                    .background(Glass)
-                    .border((2 * k).dp, Orange, switchShape)
-                    .clickable { setHand(!handMode) }
-            ) {
-                Row(Modifier.align(Alignment.Center), verticalAlignment = Alignment.CenterVertically) {
-                    GlyphIcon(Glyph.SWITCH, Modifier.sized(k, 34f, 34f), main = Orange)
-                    Spacer(Modifier.width((8 * k).dp))
-                    NfText("Switch", size = fsz(k, 28f), bold = true, color = Orange)
-                }
-            }
-
-            val selShape = RoundedCornerShape((6 * k).dp)
-            Box(
-                atTR(k, 1427f, 380f, 221f)
-                    .sized(k, 221f, 180f)
-                    .clip(selShape)
-                    .background(Glass)
-                    .border((2 * k).dp, Steel, selShape)
-            ) {
-                Column(Modifier.fillMaxSize()) {
-                    SelRow(k, "Gun", Glyph.RIFLE, !handMode, true) { setHand(false) }
-                    SelRow(k, "Hand Fight", Glyph.FIST, handMode, false) { setHand(true) }
-                    SelRow(k, "Combat", Glyph.SWORDS, false, false) { }
-                }
-            }
-
-            // ---------------- left: backpack, medkit, grenade, sprint, walk stick
+            // ---------------- left: backpack, medkit, grenade, walk stick
             GlyphButton(k, atBL(k, 26f, 418f, MID), MID, Glyph.BACKPACK, 0.58f, Orange, 3f)
             GlyphButton(k, atBL(k, 26f, 530f, MID), MID, Glyph.MEDKIT, 0.58f)
             CountBadge(k, atBL(k, 84f, 576f, 28f), "5")
             GlyphButton(k, atBL(k, 26f, 642f, MID), MID, Glyph.GRENADE, 0.58f)
             CountBadge(k, atBL(k, 84f, 688f, 28f), "3")
-            GlyphButton(k, atBL(k, 251f, 364f, BIG), BIG, Glyph.SPRINT, 0.58f, Orange, 3f, tint = Orange)
 
             // walk stick -> the character moves
             Stick(k, 220f, false, atBL(k, 175f, 555f, 220f)) { x, y ->
@@ -638,6 +475,12 @@ fun HudScreen(api: GameApi, onExit: () -> Unit) {
                 ) { input.punchTap = true }
             }
 
+            // Switch: gun <-> hand fight (round button above the fire ring)
+            GlyphButton(
+                k, atBR(k, 1400f, 510f, MID, MID), MID, Glyph.SWITCH, 0.58f,
+                Orange, 3f, tint = Orange
+            ) { setHand(!handMode) }
+
             // jump
             GlyphButton(k, atBR(k, 1534f, 632f, BIG, BIG), BIG, Glyph.JUMP, 0.58f) { input.jumpTap = true }
             GlyphButton(
@@ -668,10 +511,6 @@ fun HudScreen(api: GameApi, onExit: () -> Unit) {
                 atBC(k, 415f, 868f, 645f, 46f).sized(k, 645f, 46f),
                 verticalAlignment = Alignment.CenterVertically
             ) {
-                GlyphIcon(Glyph.HELMET, Modifier.sized(k, 40f, 40f))
-                Spacer(Modifier.width((6 * k).dp))
-                GlyphIcon(Glyph.ARMOR, Modifier.sized(k, 40f, 40f))
-                Spacer(Modifier.width((16 * k).dp))
                 NfText("HP 200/200", size = fsz(k, 24f), bold = true)
                 Spacer(Modifier.width((16 * k).dp))
                 Box(
