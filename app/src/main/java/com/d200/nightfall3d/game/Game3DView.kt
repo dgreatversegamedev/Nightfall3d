@@ -78,6 +78,7 @@ import kotlin.math.PI
 import kotlin.math.atan2
 import kotlin.math.cos
 import kotlin.math.hypot
+import kotlin.math.max
 import kotlin.math.min
 import kotlin.math.roundToInt
 import kotlin.math.sin
@@ -93,18 +94,21 @@ import kotlin.math.sqrt
 //   jumpTap  = true  one jump
 //   handMode = true  fists: gun hidden, no shooting
 //   gunWanted = n    which gun is in the hand (index in GUNS)
+//   match            the Deathmatch / Team Deathmatch logic (MatchLogic.kt). null = no match, just you.
 // Drag on the open screen = turn camera. Two fingers = pinch zoom / twist.
 //
 // Needs in app/src/main/assets/ : arena_play.glb, arena_play.json, char_blue.glb
 // Optional (gun in hand): mp5_gun.glb, ak47_gun.glb, ar_gun.glb  (the game still works without them)
 //
-// CHANGES IN THIS VERSION
-//  1) AIMING: bullets now fly exactly where the fire ring points (any direction, 360 degrees).
-//     Before, they flew where his body was facing at that moment, and the body turns a bit late,
-//     and the hand is to the side of his body. Now the bullet goes from the gun toward a point
-//     AIM_POINT_DIST meters out along the ring direction. Aiming never changes where he walks or stands.
-//  2) JUMPING: tryMove() and groundY() now get his feet height, so low things (sandbags, barrels)
-//     can be jumped over and crates can be landed on. Needs the new PlayArena.kt.
+// CHANGES IN THIS VERSION (Deathmatch test)
+//  1) BOTS: when rig.match is set, every bot is one more copy of char_blue.glb (same file, no new data),
+//     with a gun in the hand, a coloured marker over the head (green = ally, red = enemy) and a health bar.
+//  2) HITS: your bullets now ask the match if they hit a bot. Bots shoot back with their own bullet pool.
+//  3) DEAD: while you are eliminated the character is hidden and the controls are ignored until you respawn.
+//
+// Earlier changes
+//  - AIMING: bullets fly exactly where the fire ring points (360 degrees).
+//  - JUMPING: tryMove() and groundY() get his feet height (sandbags can be jumped over, crates landed on).
 // =====================================================================
 
 // ---- Tuning numbers: change these if something looks wrong ----
@@ -146,6 +150,9 @@ private const val BULLET_START_SIDE = 0.25f   // toward his right hand
 
 // ---- Gun in the right hand ----
 private const val RIGHT_HAND_JOINT = 14          // position of the right hand in the skeleton list
+
+// ---- Bots ----
+// Every bot gets a random gun from GUNS (MP5, AK-47, AR). Add a gun to GUNS and the bots can hold it too.
 
 // ---- Punch and jump (clips live in the character GLB, each 0.5 s) ----
 private const val PUNCH_LEN = 0.5f            // length of punch_1 / punch_2 / punch_3
@@ -241,6 +248,7 @@ internal class GameInput {
     var y = 0f               // floor height under him (platform / ramp / top of a box he stands on)
     var z = 0f
     var play: PlayArena? = null   // walls + ramp, filled when arena_play.json is read
+    var match: MatchState? = null // Deathmatch / Team Deathmatch (null = no match, only you)
     var camPitch = 0f        // degrees the camera is raised (drag up/down)
     var camYaw = 0f          // degrees, 0 = looking toward -Z
     var faceDeg = 0f
@@ -306,6 +314,20 @@ internal class AnimState {
     var prevClamp = false     // the fading-out clip is a one-shot (punch / jump): hold its last pose, do not loop it
 }
 
+// Everything that is drawn for ONE bot: the character copy, its gun, the marker over the head and the health bar
+internal class BotView(
+    val model: ModelNode,
+    val gun: Node,
+    val marker: CubeNode,
+    val bar: CubeNode,
+    val gunIdx: Int          // which gun in GUNS this bot holds
+) {
+    val anim = AnimState()
+    var gunLoaded = false
+    var gunAttached = false
+    var fails = 0
+}
+
 
 // Names for the pick screens in Game3DHub (so the lists live in one place)
 internal fun characterNames(): List<String> = CHAR_NAMES
@@ -353,6 +375,18 @@ internal fun Game3DView(
         }
     }
 
+    // Bot bullets (orange-red, so you can tell them from yours)
+    val botBullets = remember {
+        val mat = materialLoader.createColorInstance(Color(0xFFFF5A3C))
+        List(BOT_BULLET_COUNT) {
+            CubeNode(engine, size = Float3(0.06f, 0.06f, 0.4f), materialInstance = mat)
+                .apply { isVisible = false }
+        }
+    }
+
+    // The bots that are drawn (filled after the arena and your character are loaded)
+    val botViews = remember { mutableListOf<BotView>() }
+
     // Shield: thin glowing rings around him (hidden until the shield button is on)
     val shieldNodes = remember {
         val mat = materialLoader.createColorInstance(Color(0xFF35D3FF))
@@ -365,6 +399,7 @@ internal fun Game3DView(
     val nodes = rememberNodes {
         add(gun)
         addAll(bullets)
+        addAll(botBullets)
         addAll(shieldNodes)
     }
 
@@ -430,6 +465,62 @@ internal fun Game3DView(
         }
     }
 
+    // 4) the bots (Deathmatch / Team Deathmatch). Each bot = one more copy of char_blue.glb + a gun.
+    LaunchedEffect(ready) {
+        if (!ready) return@LaunchedEffect
+        val mt = rig.match ?: return@LaunchedEffect
+        if (botViews.isNotEmpty()) return@LaunchedEffect
+        try {
+            val enemyMat = materialLoader.createColorInstance(Color(0xFFFF3B3B))
+            val allyMat = materialLoader.createColorInstance(Color(0xFF35E07A))
+            val hpMat = materialLoader.createColorInstance(Color(0xFFF4F6FA))
+            for (b in mt.bots) {
+                val gi = (0..GUNS.lastIndex).random()      // any of the guns
+                val gdef = GUNS[gi]
+                withFrameNanos { }
+                val m = ModelNode(
+                    modelInstance = modelLoader.createModelInstance(CHAR_FILES[0]),   // always the blue one
+                    autoAnimate = false,
+                    scaleToUnits = CHAR_HEIGHT,
+                    centerOrigin = Position(0f, -1f, 0f)
+                )
+                m.isVisible = false
+                nodes.add(m)
+
+                val g = Node(engine).apply { isVisible = false }
+                nodes.add(g)
+                var gunOk = false
+                try {
+                    withFrameNanos { }
+                    val gm = ModelNode(
+                        modelInstance = modelLoader.createModelInstance(gdef.file),
+                        autoAnimate = false
+                    )
+                    gm.position = gdef.grip
+                    g.addChildNode(gm)
+                    gunOk = true
+                } catch (e: Throwable) {
+                    Log.e("Game3D", "Could not load bot gun", e)
+                }
+
+                val friendly = mt.teamMode && b.team == 0
+                val marker = CubeNode(
+                    engine, size = Float3(0.22f, 0.22f, 0.22f),
+                    materialInstance = if (friendly) allyMat else enemyMat
+                ).apply { isVisible = false }
+                val bar = CubeNode(engine, size = Float3(0.7f, 0.07f, 0.07f), materialInstance = hpMat)
+                    .apply { isVisible = false }
+                nodes.add(marker)
+                nodes.add(bar)
+
+                botViews.add(BotView(m, g, marker, bar, gi).also { it.gunLoaded = gunOk })
+            }
+        } catch (e: Throwable) {
+            Log.e("Game3D", "Could not build the bots", e)
+            note = "Could not load bots: ${e.message}"
+        }
+    }
+
     Box(modifier.fillMaxSize()) {
         Scene(
             modifier = Modifier.fillMaxSize(),
@@ -439,7 +530,9 @@ internal fun Game3DView(
             cameraNode = cameraNode,
             childNodes = nodes,
             environment = environment,
-            onFrame = { nanos -> stepGame(nanos, rig, models, cameraNode, engine, gun, bullets, shieldNodes) }
+            onFrame = { nanos ->
+                stepGame(nanos, rig, models, cameraNode, engine, gun, bullets, shieldNodes, botViews, botBullets)
+            }
         )
 
         // Whole-screen touch layer UNDER the HUD buttons: one finger drag = turn camera, two fingers = zoom/twist
@@ -500,7 +593,9 @@ private fun stepGame(
     engine: Engine,
     gun: Node,
     bullets: List<CubeNode>,
-    shieldNodes: List<CubeNode>
+    shieldNodes: List<CubeNode>,
+    botViews: List<BotView>,
+    botBullets: List<CubeNode>
 ) {
     // Paused: freeze everything (the camera stays where it is)
     if (rig.paused) { rig.lastNanos = nanos; return }
@@ -509,6 +604,21 @@ private fun stepGame(
 
     val dt = if (rig.lastNanos == 0L) 0f else ((nanos - rig.lastNanos) / 1_000_000_000f).coerceIn(0f, 0.05f)
     rig.lastNanos = nanos
+
+    // Eliminated: the controls do nothing until he respawns
+    val mt = rig.match
+    val dead = mt?.playerDead == true
+    if (dead) {
+        rig.shooting = false
+        rig.aimHeld = false
+        rig.aimX = 0f
+        rig.aimY = 0f
+        rig.joyX = 0f
+        rig.joyY = 0f
+        rig.punchTap = false
+        rig.jumpTap = false
+        rig.punchClip = ""
+    }
 
     // ---- Jump: crouch -> up and down with real height -> landing ----
     if (rig.jumpTap) {
@@ -665,7 +775,7 @@ private fun stepGame(
     for (i in models.indices) {
         val m = models[i] ?: continue
         val on = i == rig.active
-        m.isVisible = on
+        m.isVisible = on && !dead
         if (on) {
             m.position = Position(rig.x, rig.y + rig.jumpH, rig.z)
             m.rotation = Rotation(y = rig.faceDeg)
@@ -682,8 +792,8 @@ private fun stepGame(
         if (attachGun(engine, gun, activeModel)) rig.gunOwner = rig.active
         else rig.attachFails[rig.active]++
     }
-    // the gun is put away while he punches
-    gun.isVisible = rig.gunLoaded && activeModel != null && rig.gunOwner == rig.active && rig.punchClip.isEmpty() && !rig.handMode
+    // the gun is put away while he punches (and while he is eliminated)
+    gun.isVisible = rig.gunLoaded && activeModel != null && rig.gunOwner == rig.active && rig.punchClip.isEmpty() && !rig.handMode && !dead
     val def = rig.gunDef
     val turn = def.aim[want] ?: def.carry
     gun.position = def.pos
@@ -717,6 +827,13 @@ private fun stepGame(
     updateBullets(dt, rig, bullets, bdirX, bdirZ)
     updateShield(rig, shieldNodes, nanos)
 
+    // Deathmatch / Team Deathmatch: bots think, shoot, die, respawn. Then they are drawn.
+    if (mt != null) {
+        mt.update(dt, rig)
+        stepBots(dt, rig, mt, botViews, botBullets, engine)
+        if (mt.over) rig.paused = true      // match finished: freeze the game, the HUD shows the result
+    }
+
     // Chest-level follow camera (distance = pinch zoom, direction = drag)
     val dist = CAM_DIST * rig.zoom
     val pr = rig.camPitch * DEG_TO_RAD
@@ -724,6 +841,57 @@ private fun stepGame(
     val camY = rig.y + rig.jumpH * 0.4f      // the camera follows a jump only a little (less shake)
     cameraNode.position = Position(rig.x - fx * back, camY + CAM_HEIGHT + dist * sin(pr), rig.z - fz * back)
     cameraNode.lookAt(Position(rig.x + fx * CAM_LOOK_AHEAD, camY + CAM_LOOK_Y, rig.z + fz * CAM_LOOK_AHEAD))
+}
+
+// ---------------- Bots ----------------
+
+// Puts every bot where the match logic says it is, plays its animation, holds its gun, and draws the bot bullets.
+private fun stepBots(
+    dt: Float,
+    rig: GameInput,
+    mt: MatchState,
+    views: List<BotView>,
+    botBullets: List<CubeNode>,
+    engine: Engine
+) {
+    val barYaw = -rig.camYaw                     // health bar turned to face the camera
+    for (i in views.indices) {
+        if (i >= mt.bots.size) break
+        val b = mt.bots[i]
+        val v = views[i]
+        val gdef = GUNS[v.gunIdx.coerceIn(0, GUNS.lastIndex)]
+        val vis = b.alive
+        v.model.isVisible = vis
+        v.marker.isVisible = vis
+        v.bar.isVisible = vis
+        if (!vis) { v.gun.isVisible = false; continue }
+
+        v.model.position = Position(b.x, b.y, b.z)
+        v.model.rotation = Rotation(y = b.faceDeg)
+        driveAnimation(v.model, v.anim, b.anim, dt, 1f, -1f, "")
+
+        if (v.gunLoaded && !v.gunAttached && v.fails < 10) {
+            if (attachGun(engine, v.gun, v.model)) v.gunAttached = true else v.fails++
+        }
+        v.gun.isVisible = v.gunLoaded && v.gunAttached
+        val turn = gdef.aim[b.anim] ?: gdef.carry
+        v.gun.position = gdef.pos
+        v.gun.quaternion = quatXYZ(turn.x, turn.y, turn.z)
+        v.gun.scale = Float3(gdef.scale, gdef.scale, gdef.scale)
+
+        v.marker.position = Position(b.x, b.y + 2.35f, b.z)
+        v.bar.position = Position(b.x, b.y + 2.1f, b.z)
+        v.bar.rotation = Rotation(y = barYaw)
+        v.bar.scale = Float3(max(0.02f, b.hp.toFloat() / BOT_MAX_HP), 1f, 1f)
+    }
+
+    for (i in 0 until BOT_BULLET_COUNT) {
+        val n = botBullets[i]
+        if (!mt.bAlive[i]) { n.isVisible = false; continue }
+        n.position = Position(mt.bx[i], mt.by[i], mt.bz[i])
+        n.rotation = Rotation(y = atan2(mt.bdx[i], mt.bdz[i]) * RAD_TO_DEG)
+        n.isVisible = true
+    }
 }
 
 // ---------------- Animation with blending ----------------
@@ -801,7 +969,7 @@ private fun driveAnimation(
 // ---------------- Shield ----------------
 
 private fun updateShield(rig: GameInput, nodes: List<CubeNode>, nanos: Long) {
-    if (!rig.shieldOn) {
+    if (!rig.shieldOn || rig.match?.playerDead == true) {
         for (n in nodes) if (n.isVisible) n.isVisible = false
         return
     }
@@ -844,6 +1012,7 @@ private fun updateBullets(dt: Float, rig: GameInput, bullets: List<CubeNode>, fx
             rig.fireTimer = FIRE_INTERVAL
         }
     }
+    val mt = rig.match
     for (i in 0 until BULLET_COUNT) {
         if (!rig.bAlive[i]) { bullets[i].isVisible = false; continue }
         var left = BULLET_SPEED * dt
@@ -853,6 +1022,8 @@ private fun updateBullets(dt: Float, rig: GameInput, bullets: List<CubeNode>, fx
             val nz = rig.bz[i] + rig.bdz[i] * step
             if ((rig.play?.bulletHits(nx, rig.by[i], nz) ?: false) || rig.bDist[i] > BULLET_RANGE) {
                 rig.bAlive[i] = false
+            } else if (mt != null && mt.bulletStep(nx, rig.by[i], nz, 0, rig)) {
+                rig.bAlive[i] = false            // hit a bot (id 0 = you is the owner)
             } else {
                 rig.bx[i] = nx
                 rig.bz[i] = nz
