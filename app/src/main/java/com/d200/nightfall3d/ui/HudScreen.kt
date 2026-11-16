@@ -56,10 +56,16 @@ import kotlin.math.roundToInt
 //   walk stick -> move | fire ring -> aim + shoot (gun mode) / big fist button -> punch (hand mode)
 //   jump | Switch (gun mode <-> hand mode) | weapon list -> which gun is in the hand
 //
-// CHANGES IN THIS VERSION (Build 1 fixes)
-//  1) Top right icons are now LIVE: blue icon = friends alive (you included), red skull = enemies alive.
-//  2) Scope button only works on a gun that has a scope (GunDef.hasScope). Other guns: the button is dimmed
-//     and shows "This gun has no scope".
+// CHANGES IN THIS VERSION
+//  1) CAPTURE THE FLAG now starts a real match (before, only Deathmatch / Team Deathmatch did, so no flag showed).
+//     The match gets the capture limit and the Blue / Red bot numbers from the Match Setup screen.
+//  2) Scoreboard in Capture the Flag: captures for each team, "FIRST TO n" (or "NO LIMIT"), and a line that tells
+//     you what to do now and how far it is ("GET THE ENEMY FLAG  34 m").
+//  3) A banner "YOU HAVE THE FLAG" while you carry the enemy flag.
+//
+// EARLIER (Build 1)
+//  1) Top right icons are LIVE: blue icon = friends alive (you included), red skull = enemies alive.
+//  2) Scope button only works on a gun that has a scope (GunDef.hasScope).
 //  3) Orange accent on the scoreboard title.
 //
 // One size system: BIG 112 | MID 88 | SMALL 80 | TOP 58 | sticks 220 (walk) and 200 (fire ring)
@@ -258,7 +264,10 @@ private fun CountBadge(k: Float, modifier: Modifier, text: String) {
     ) { NfText(text, size = fsz(k, 22f), bold = true, align = TextAlign.Center) }
 }
 
-/** Deathmatch: top 3 players. Team Deathmatch: your team vs the enemy team. Plus the match clock. */
+/**
+ * Deathmatch: top 3 players. Team Deathmatch: your team vs the enemy team. Plus the match clock.
+ * Capture the Flag: captures for each team, the capture limit, and what you should do now.
+ */
 @Composable
 private fun ScoreBoard(k: Float, modifier: Modifier, mt: MatchState) {
     val shape = RoundedCornerShape((6 * k).dp)
@@ -280,6 +289,26 @@ private fun ScoreBoard(k: Float, modifier: Modifier, mt: MatchState) {
             Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
                 NfText("YOUR TEAM  ${mt.teamA}", size = fsz(k, 26f), bold = true, color = Color(0xFF35E07A))
                 NfText("${mt.teamB}  ENEMY TEAM", size = fsz(k, 26f), bold = true, color = Color(0xFFFF5A5A))
+            }
+            if (mt.ctf) {
+                NfText(
+                    if (mt.captureLimit > 0) "FIRST TO ${mt.captureLimit} CAPTURES" else "NO LIMIT - TIME DECIDES",
+                    size = fsz(k, 16f),
+                    color = NfColors.TextDim,
+                    bold = true,
+                    modifier = Modifier.fillMaxWidth(),
+                    align = TextAlign.Center
+                )
+                if (mt.objText.isNotEmpty()) {
+                    NfText(
+                        mt.objText,
+                        size = fsz(k, 19f),
+                        color = Orange,
+                        bold = true,
+                        modifier = Modifier.fillMaxWidth(),
+                        align = TextAlign.Center
+                    )
+                }
             }
         } else {
             mt.rows().take(3).forEachIndexed { i, r ->
@@ -309,10 +338,21 @@ fun HudScreen(api: GameApi, onExit: () -> Unit) {
     val gunList = remember { GunLoadout.names(allGuns) }
     val startGun = remember { gunList.indexOf(api.equippedWeaponId).let { if (it < 0) 0 else it } }
 
-    // Deathmatch / Team Deathmatch: the match with the bots. null for every other mode (just you, like before).
-    val matchOn = api.match.mode == GameMode.DEATHMATCH || api.match.mode == GameMode.TEAM_DEATHMATCH
+    // Deathmatch / Team Deathmatch / Capture the Flag: the match with the bots. null for every other mode (just you).
+    val matchOn = api.match.mode == GameMode.DEATHMATCH ||
+        api.match.mode == GameMode.TEAM_DEATHMATCH ||
+        api.match.mode == GameMode.CAPTURE_FLAG
     val match = remember {
-        if (matchOn) MatchState(api.match.mode, MatchSettings.botCount, api.match.timeLimit) else null
+        if (matchOn) {
+            MatchState(
+                api.match.mode,
+                MatchSettings.botCount,
+                api.match.timeLimit,
+                api.match.captureLimit,
+                MatchSettings.blueBots,
+                MatchSettings.redBots
+            )
+        } else null
     }
 
     // The one object the 3D game reads. The buttons below write into it.
@@ -433,7 +473,7 @@ fun HudScreen(api: GameApi, onExit: () -> Unit) {
             GlyphButton(k, atTL(k, 343f, 84f), TOP, Glyph.EMOJI, 0.52f)
             GlyphButton(k, atTL(k, 260f, 161f), TOP, Glyph.CHAT, 0.52f)
 
-            // ---------------- top centre: scoreboard + kill feed (Deathmatch / Team Deathmatch only)
+            // ---------------- top centre: scoreboard + kill feed (Deathmatch / Team Deathmatch / Capture the Flag)
             if (match != null) {
                 ScoreBoard(k, atTL(k, 620f, 10f).width((430 * k).dp), match)
                 val feedText = match.feed
@@ -443,8 +483,18 @@ fun HudScreen(api: GameApi, onExit: () -> Unit) {
                         size = fsz(k, 24f),
                         bold = true,
                         color = Color(0xFFFFE066),
-                        modifier = atTL(k, 620f, 160f).width((430 * k).dp),
+                        modifier = atTL(k, 620f, if (match.ctf) 215f else 160f).width((430 * k).dp),
                         align = TextAlign.Center
+                    )
+                }
+                // you carry the enemy flag
+                if (match.ctf && match.youCarry && !match.playerDead) {
+                    NfText(
+                        "YOU HAVE THE FLAG",
+                        size = fsz(k, 30f),
+                        bold = true,
+                        color = Orange,
+                        modifier = Modifier.align(Alignment.TopCenter).padding(top = (255 * k).dp)
                     )
                 }
             }
@@ -544,7 +594,7 @@ fun HudScreen(api: GameApi, onExit: () -> Unit) {
                     Steel, 3f, if (shieldOn) Color(0xE01B4DA0) else GlassSoft
                 ) {
                     shieldOn = !shieldOn
-                    input.shieldOn = shieldOn      // shield bubble around the character
+                    input.shieldOn = shieldOn      // glass shield around the character
                 }
             }
 
@@ -711,6 +761,14 @@ fun HudScreen(api: GameApi, onExit: () -> Unit) {
                     ) {
                         NfText("MATCH OVER", size = fsz(k, 34f), color = NfColors.TextDim, bold = true)
                         NfText(match.resultText, size = fsz(k, 64f), bold = true, color = NfColors.Gold)
+                        if (match.ctf) {
+                            NfText(
+                                "Captures  ${match.teamA} - ${match.teamB}",
+                                size = fsz(k, 32f),
+                                bold = true,
+                                color = Orange
+                            )
+                        }
                         NfText(
                             "Your kills ${match.myKills()}    Deaths ${match.deaths[0]}",
                             size = fsz(k, 28f),
