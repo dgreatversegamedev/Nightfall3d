@@ -19,14 +19,16 @@ import kotlin.random.Random
 // MatchLogic.kt  -  Deathmatch + Team Deathmatch (offline test, bots).
 // No drawing in here. Game3DView.kt draws the bots (copies of the blue GLB) from the numbers in this file.
 //
-// How it works
 //   fighter id 0   = you
 //   fighter id 1.. = bots
 //   Deathmatch      : everybody is an enemy of everybody (each bot has its own team number)
 //   Team Deathmatch : you + the first half of the bots = team 0 (allies), the rest = team 1 (enemies)
 //                     bullets pass through allies (no friendly fire)
 //
-// Change the numbers below to tune the test.
+// CHANGES IN THIS VERSION (Build 1 fixes)
+//  1) friendsAlive / enemiesAlive: live counts for the HUD icons at the top right.
+//  2) Spawn / revive can no longer put you inside a wall (clearance check all around the body + safe fallback).
+//  3) hitFx: a list of hit spots (x, y, z, kind) that Game3DView turns into sparks (wall) and blood (fighter).
 // =====================================================================
 
 object MatchSettings {
@@ -59,6 +61,7 @@ private const val BOT_WALK = 2.2f
 private const val BOT_RUN = 3.9f
 private const val BOT_TURN = 420f             // degrees per second
 private const val SPAWN_SCALE = 0.95f         // spawn area = this fraction of the arena size (lower it if bots spawn outside)
+private const val SPAWN_CLEAR = 0.65f         // a spawn spot needs this much free space all around the body (meters)
 
 private const val M_FACING_OFFSET = 0f        // same as FACING_OFFSET in Game3DView.kt
 private const val M_RAD = 180f / PI.toFloat()
@@ -115,8 +118,16 @@ internal class MatchState(val mode: GameMode, requestedBots: Int, timeLimitMin: 
     var teamA by mutableIntStateOf(0)          // your team
     var teamB by mutableIntStateOf(0)          // enemy team
 
+    // LIVE counts for the HUD icons (top right): friends still alive (you included) and enemies still alive
+    var friendsAlive by mutableIntStateOf(if (teamMode) 1 + bots.count { it.team == 0 } else 1)
+    var enemiesAlive by mutableIntStateOf(if (teamMode) bots.count { it.team != 0 } else bots.size)
+
     val kills = IntArray(bots.size + 1)
     val deaths = IntArray(bots.size + 1)
+
+    // ---- hit spots for the sparks / blood (filled here, emptied by Game3DView every frame) ----
+    // each entry = [x, y, z, kind]   kind 0 = bullet hit a wall (sparks), kind 1 = bullet hit a fighter (blood)
+    val hitFx = ArrayList<FloatArray>()
 
     // ---- bot bullets (drawn by Game3DView) ----
     val bAlive = BooleanArray(BOT_BULLET_COUNT)
@@ -143,6 +154,22 @@ internal class MatchState(val mode: GameMode, requestedBots: Int, timeLimitMin: 
             list.add(ScoreRow(if (id == 0) "YOU" else "BOT $id", kills[id], deaths[id], teamOf(id), id == 0))
         }
         return list.sortedByDescending { it.kills }
+    }
+
+    private fun addHit(x: Float, y: Float, z: Float, kind: Int) {
+        if (hitFx.size < 40) hitFx.add(floatArrayOf(x, y, z, kind.toFloat()))
+    }
+
+    // Counts who is really alive right now (called every frame)
+    private fun refreshCounts() {
+        var f = if (playerDead) 0 else 1
+        var e = 0
+        for (b in bots) {
+            if (!b.alive) continue
+            if (teamMode && b.team == 0) f++ else e++
+        }
+        if (f != friendsAlive) friendsAlive = f
+        if (e != enemiesAlive) enemiesAlive = e
     }
 
     // ------------------------------------------------------------------
@@ -175,6 +202,7 @@ internal class MatchState(val mode: GameMode, requestedBots: Int, timeLimitMin: 
 
         for (b in bots) updateBot(b, dt, rig, play)
         updateBotBullets(dt, rig, play)
+        refreshCounts()
 
         if (timeLeft <= 0f) endByTime()
     }
@@ -191,6 +219,7 @@ internal class MatchState(val mode: GameMode, requestedBots: Int, timeLimitMin: 
             val fy = feetY(id, rig)
             if (y < fy || y > fy + HIT_HEIGHT) continue
             val dmg = if (owner == 0) PLAYER_BULLET_DMG else BOT_BULLET_DMG
+            addHit(x, y, z, 1)                       // blood
             if (id == 0) damagePlayer(dmg, owner, rig) else damageBot(bots[id - 1], dmg, owner)
             return true
         }
@@ -222,21 +251,34 @@ internal class MatchState(val mode: GameMode, requestedBots: Int, timeLimitMin: 
     // ------------------------------------------------------------------
     // Spawning
     // ------------------------------------------------------------------
+    // A spot is OK only if the whole body fits: the centre AND a ring of 8 points around it
+    // (SPAWN_CLEAR meters out) are free at knee, chest and head height. So he can never appear half inside a wall.
     private fun spawnOk(play: PlayArena, x: Float, z: Float): Boolean {
-        if (play.bulletHits(x, 0.4f, z) || play.bulletHits(x, 1.2f, z)) return false
+        val floor = play.groundY(play.blueX, play.blueZ, 0.3f)     // the normal floor height of this arena
+        val g = play.groundY(x, z, 0.3f)
+        if (g > floor + 0.5f) return false                          // not on top of crates or ramps
+        val heights = floatArrayOf(g + 0.4f, g + 1.0f, g + 1.6f)
+        for (h in heights) {
+            if (play.bulletHits(x, h, z)) return false
+            for (k in 0 until 8) {
+                val a = k * (PI.toFloat() / 4f)
+                if (play.bulletHits(x + cos(a) * SPAWN_CLEAR, h, z + sin(a) * SPAWN_CLEAR)) return false
+            }
+        }
         // must be inside the arena: a clear line from the blue spawn or from the middle
         return los(play, play.blueX, 1.2f, play.blueZ, x, 1.2f, z) || los(play, 0f, 1.2f, 0f, x, 1.2f, z)
     }
 
     // Picks a random free spot that is far from the other living fighters.
+    // If no good spot is found, falls back to the blue spawn point (the one you start the match on, always free).
     private fun pickSpawn(rig: GameInput, play: PlayArena, selfId: Int): FloatArray {
         val r = max(max(kotlin.math.abs(play.blueX), kotlin.math.abs(play.blueZ)), 8f) * SPAWN_SCALE
-        var bestX = -play.blueX
-        var bestZ = -play.blueZ
+        var bestX = play.blueX
+        var bestZ = play.blueZ
         var bestScore = -1f
         var tries = 0
         var found = 0
-        while (tries < 60 && found < 10) {
+        while (tries < 150 && found < 10) {
             tries++
             val x = (Random.nextFloat() * 2f - 1f) * r
             val z = (Random.nextFloat() * 2f - 1f) * r
@@ -338,6 +380,7 @@ internal class MatchState(val mode: GameMode, requestedBots: Int, timeLimitMin: 
         }
         feedT = 3f
         board++
+        refreshCounts()
 
         if (teamMode) {
             if (teamA >= KILL_LIMIT_TDM) finish("YOUR TEAM WINS")
@@ -383,6 +426,7 @@ internal class MatchState(val mode: GameMode, requestedBots: Int, timeLimitMin: 
             val d = hypot(dx, dz)
             if (d > PUNCH_RANGE || d < 0.01f) continue
             if ((dx * sx + dz * sz) / d < 0.3f) continue
+            addHit(b.x, b.y + 1.3f, b.z, 1)
             damageBot(b, PUNCH_DMG, 0)
         }
     }
@@ -589,7 +633,9 @@ internal class MatchState(val mode: GameMode, requestedBots: Int, timeLimitMin: 
                 val step = min(0.25f, left)
                 val nx = bx[i] + bdx[i] * step
                 val nz = bz[i] + bdz[i] * step
-                if (play.bulletHits(nx, by[i], nz) || bDist[i] > BOT_BULLET_RANGE) {
+                val wall = play.bulletHits(nx, by[i], nz)
+                if (wall || bDist[i] > BOT_BULLET_RANGE) {
+                    if (wall) addHit(bx[i], by[i], bz[i], 0)      // sparks on the wall
                     bAlive[i] = false
                 } else if (bulletStep(nx, by[i], nz, bOwner[i], rig)) {
                     bAlive[i] = false
