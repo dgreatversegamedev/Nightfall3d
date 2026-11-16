@@ -56,9 +56,16 @@ import kotlin.random.Random
 // The HUD (HudScreen.kt) only writes into one GameInput object (see the class below).
 //
 // Needs in app/src/main/assets/ : arena_play.glb, arena_play.json, char_blue.glb
-// Optional (gun in hand): mp5_gun.glb, ak47_gun.glb, ar_gun.glb  (the game still works without them)
+// Optional (gun in hand): mp5_gun.glb, ak47_gun.glb, ar_gun.glb, rifle.glb, carbine.glb  (the game still works without them)
 //
-// CHANGES IN THIS VERSION (Build 1 fixes)
+// CHANGES IN THIS VERSION
+//  1) CAPTURE THE FLAG: each team's flag is drawn (pole + cloth + tall beam + base plate). The flag follows
+//     whoever carries it. The numbers come from MatchLogic.kt (MatchState).
+//  2) GUN FIT MODE: the HUD "FIT" button turns on rig.fitOn. While it is on, the grip / scale / turn numbers
+//     of the gun in your hand come from the GameInput fit* values (changed live by the HUD panel) instead of
+//     the GUNS list. When you are happy, the panel copies a ready GunDef(...) block to paste into GUNS below.
+//
+// EARLIER FIXES (Build 1)
 //  1) BULLETS: long glowing tracer, muzzle flash at the gun, orange sparks when a bullet hits a wall,
 //     red blood burst when it hits a fighter.
 //  2) SHIELD: a bubble made of hexagon + pentagon panels (soccer-ball cage) all around the character.
@@ -132,10 +139,13 @@ private const val JUMP_LAND_T = 0.3594f
 private const val JUMP_SPEED = 8f
 private const val GRAVITY = 24f
 
+// ---- Capture the Flag drawing ----
+private const val FLAG_NODES_PER_TEAM = 4     // pole, cloth, beam, base plate
+
 // Gun turn (degrees, X/Y/Z)
 internal class GunTurn(val x: Float, val y: Float, val z: Float)
 
-// One gun. pos/scale/grip/carry/aim are the fit numbers for THAT gun (from the gun fit viewer).
+// One gun. pos/scale/grip/carry/aim are the fit numbers for THAT gun (from the gun fit mode in the HUD).
 // hasScope = true only for guns that really have a scope (sniper). The HUD scope button only works for those.
 internal class GunDef(
     val name: String,
@@ -149,6 +159,7 @@ internal class GunDef(
 )
 
 // ADD NEW GUNS HERE (one entry each). For a sniper add  hasScope = true  as the last line.
+// To fit a gun: play, tap FIT in the HUD, adjust, tap COPY, then paste the copied block here in place of that gun.
 internal val GUNS = listOf(
     GunDef(
         name = "MP5",
@@ -189,8 +200,8 @@ internal val GUNS = listOf(
             "run_shoot" to GunTurn(-167f, 31f, -37f)
         )
     ),
-    // NEW: rifle.glb. Fit numbers are copied from the AR for now, so the hold may look a little off until it is fitted.
-    // hasScope = true is a guess (looks like a scoped rifle). Set it to false if it has no scope.
+    // rifle.glb. Fit numbers are copied from the AR for now, so the hold may look a little off until it is fitted
+    // (use the FIT button in the HUD). hasScope = true is a guess; set it to false if it has no scope.
     GunDef(
         name = "Rifle",
         file = "rifle.glb",
@@ -205,7 +216,7 @@ internal val GUNS = listOf(
         ),
         hasScope = true
     ),
-    // NEW: carbine.glb. Same temporary fit numbers as the AR.
+    // carbine.glb. Same temporary fit numbers as the AR.
     GunDef(
         name = "Carbine",
         file = "carbine.glb",
@@ -237,7 +248,7 @@ internal class GameInput {
     var y = 0f               // floor height under him
     var z = 0f
     var play: PlayArena? = null   // walls + ramp, filled when arena_play.json is read
-    var match: MatchState? = null // Deathmatch / Team Deathmatch (null = no match, only you)
+    var match: MatchState? = null // Deathmatch / Team Deathmatch / Capture the Flag (null = no match, only you)
     var camPitch = 0f
     var camYaw = 0f          // degrees, 0 = looking toward -Z
     var faceDeg = 0f
@@ -259,6 +270,7 @@ internal class GameInput {
     var gunOwner = -1
     var gunLoaded = false
     var gunDef: GunDef = GUNS[0]
+    var gunChild: Node? = null    // the gun model inside the gun holder (its position = the grip numbers)
     val attachFails = IntArray(3)
     var fireTimer = 0f
     var mx = 0f
@@ -298,6 +310,25 @@ internal class GameInput {
     var moveX = 0f
     var moveZ = 0f
     var runMode = false
+
+    // ---- Gun fit mode (HUD "FIT" panel) ----
+    var fitOn = false                 // true = the gun uses the fit numbers below
+    var fitSel = 0                    // which pose is shown/edited: 0 carry, 1 shoot, 2 walk_shoot, 3 run_shoot
+    var fitGunName = ""               // the gun the fit numbers belong to (they reload when the gun changes)
+    var fitGx = 0f                    // grip x / y / z
+    var fitGy = 0f
+    var fitGz = 0f
+    var fitScale = 0.24f
+    val fitRot = HashMap<String, FloatArray>()   // pose name -> turn x, y, z (degrees)
+    var fitTick by mutableIntStateOf(0)          // goes up whenever a fit number changes (so the HUD redraws)
+    var fitPose by mutableStateOf("carry")       // the pose being edited right now (shown in the HUD)
+
+    fun fitKey(): String = when (fitSel) {
+        1 -> "shoot"
+        2 -> "walk_shoot"
+        3 -> "run_shoot"
+        else -> "carry"
+    }
 }
 
 // Where one character is in its animations (used for the blend)
@@ -455,6 +486,24 @@ internal fun Game3DView(
         }.also { l -> l.forEach { it.isVisible = false } }
     }
 
+    // Capture the Flag: for each team a pole, a cloth, a tall beam (so you can see it from far) and a base plate.
+    // Team 0 (your flag) is orange, team 1 (the enemy flag) is cyan. Hidden unless the mode is Capture the Flag.
+    val flagNodes = remember {
+        val poleMat = materialLoader.createColorInstance(Color(0xFFDADADA))
+        val orange = materialLoader.createColorInstance(Color(0xFFFF8A00))
+        val cyan = materialLoader.createColorInstance(Color(0xFF35D3FF))
+        val list = ArrayList<CubeNode>()
+        for (team in 0..1) {
+            val mat = if (team == 0) orange else cyan
+            list.add(CubeNode(engine, size = Float3(0.07f, 2.2f, 0.07f), materialInstance = poleMat))     // pole
+            list.add(CubeNode(engine, size = Float3(0.75f, 0.45f, 0.04f), materialInstance = mat))        // cloth
+            list.add(CubeNode(engine, size = Float3(0.09f, 9f, 0.09f), materialInstance = mat))           // beam
+            list.add(CubeNode(engine, size = Float3(2.6f, 0.06f, 2.6f), materialInstance = mat))          // base plate
+        }
+        list.forEach { it.isVisible = false }
+        list.toList()
+    }
+
     // The bots that are drawn (filled after the arena and your character are loaded)
     val botViews = remember { mutableListOf<BotView>() }
 
@@ -478,6 +527,7 @@ internal fun Game3DView(
         addAll(shieldNodes)
         add(muzzleFlash)
         addAll(fxNodes)
+        addAll(flagNodes)
     }
 
     // 1) arena, 2) character. One step at a time so nothing freezes.
@@ -526,6 +576,7 @@ internal fun Game3DView(
             rig.gunLoaded = false
             gunModel?.let { gun.removeChildNode(it); it.destroy() }
             gunModel = null
+            rig.gunChild = null
             val gm = ModelNode(
                 modelInstance = modelLoader.createModelInstance(def.file),
                 autoAnimate = false
@@ -533,6 +584,7 @@ internal fun Game3DView(
             gm.position = def.grip
             gun.addChildNode(gm)
             gunModel = gm
+            rig.gunChild = gm
             rig.gunDef = def
             rig.gunLoaded = true
             note = ""
@@ -542,7 +594,7 @@ internal fun Game3DView(
         }
     }
 
-    // 4) the bots (Deathmatch / Team Deathmatch). Each bot = one more copy of char_blue.glb + a gun.
+    // 4) the bots (Deathmatch / Team Deathmatch / Capture the Flag). Each bot = one more copy of char_blue.glb + a gun.
     LaunchedEffect(ready) {
         if (!ready) return@LaunchedEffect
         val mt = rig.match ?: return@LaunchedEffect
@@ -608,7 +660,7 @@ internal fun Game3DView(
             childNodes = nodes,
             environment = environment,
             onFrame = { nanos ->
-                stepGame(nanos, rig, models, cameraNode, engine, gun, bullets, shieldNodes, botViews, botBullets, muzzleFlash, fxNodes)
+                stepGame(nanos, rig, models, cameraNode, engine, gun, bullets, shieldNodes, botViews, botBullets, muzzleFlash, fxNodes, flagNodes)
             }
         )
 
@@ -663,6 +715,30 @@ internal fun Game3DView(
     }
 }
 
+// The animation name the gun fit mode forces for each pose tab
+private fun fitWantOf(sel: Int): String = when (sel) {
+    1 -> "shoot"
+    2 -> "walk_shoot"
+    3 -> "run_shoot"
+    else -> "idle"
+}
+
+// Copies the numbers of the gun in the hand into the fit values, once per gun (so the panel starts from the real numbers)
+private fun syncFit(rig: GameInput, def: GunDef) {
+    if (rig.fitGunName == def.name) return
+    rig.fitGunName = def.name
+    rig.fitGx = def.grip.x
+    rig.fitGy = def.grip.y
+    rig.fitGz = def.grip.z
+    rig.fitScale = def.scale
+    rig.fitRot["carry"] = floatArrayOf(def.carry.x, def.carry.y, def.carry.z)
+    for (key in listOf("shoot", "walk_shoot", "run_shoot")) {
+        val t = def.aim[key] ?: def.carry
+        rig.fitRot[key] = floatArrayOf(t.x, t.y, t.z)
+    }
+    rig.fitTick++
+}
+
 private fun stepGame(
     nanos: Long,
     rig: GameInput,
@@ -675,7 +751,8 @@ private fun stepGame(
     botViews: List<BotView>,
     botBullets: List<CubeNode>,
     muzzleFlash: CubeNode,
-    fxNodes: List<CubeNode>
+    fxNodes: List<CubeNode>,
+    flagNodes: List<CubeNode>
 ) {
     // Paused: freeze everything (the camera stays where it is)
     if (rig.paused) { rig.lastNanos = nanos; return }
@@ -820,12 +897,13 @@ private fun stepGame(
     val base = if (rig.speed < 0.15f) "idle" else if (rig.speed > (WALK_SPEED + RUN_SPEED) / 2f) "run" else "walk"
     val shootWant = if (rig.shooting) (if (base == "idle") "shoot" else base + "_shoot") else base
     val want = when {
+        rig.fitOn -> fitWantOf(rig.fitSel)           // gun fit mode: the pose picked in the panel
         rig.jumpState != 0 -> JUMP_CLIP
         rig.punchClip.isNotEmpty() -> rig.punchClip
         rig.crouch -> JUMP_CLIP
         else -> shootWant
     }
-    val forceTime = if (rig.jumpState != 0) rig.jumpClipT else if (rig.punchClip.isNotEmpty()) rig.punchT else if (rig.crouch) CROUCH_POSE_T else -1f
+    val forceTime = if (rig.fitOn) -1f else if (rig.jumpState != 0) rig.jumpClipT else if (rig.punchClip.isNotEmpty()) rig.punchT else if (rig.crouch) CROUCH_POSE_T else -1f
     val layerBase = if (want == "punch_1" || want == "punch_2") base else ""
 
     val moveDot = sx * rig.moveX + sz * rig.moveZ
@@ -850,12 +928,25 @@ private fun stepGame(
         if (attachGun(engine, gun, activeModel)) rig.gunOwner = rig.active
         else rig.attachFails[rig.active]++
     }
-    gun.isVisible = rig.gunLoaded && activeModel != null && rig.gunOwner == rig.active && rig.punchClip.isEmpty() && !rig.handMode && !dead && !rig.scopeOn
+    gun.isVisible = rig.gunLoaded && activeModel != null && rig.gunOwner == rig.active && (rig.punchClip.isEmpty() || rig.fitOn) && !rig.handMode && !dead && !rig.scopeOn
     val def = rig.gunDef
-    val turn = def.aim[want] ?: def.carry
-    gun.position = def.pos
-    gun.quaternion = quatXYZ(turn.x, turn.y, turn.z)
-    gun.scale = Float3(def.scale, def.scale, def.scale)
+    syncFit(rig, def)
+    if (rig.fitOn) {
+        // gun fit mode: numbers from the HUD panel (grip, scale, and the turn of the pose being edited)
+        val key = rig.fitKey()
+        if (rig.fitPose != key) rig.fitPose = key
+        val r = rig.fitRot[key] ?: floatArrayOf(0f, 0f, 0f)
+        gun.position = def.pos
+        gun.quaternion = quatXYZ(r[0], r[1], r[2])
+        gun.scale = Float3(rig.fitScale, rig.fitScale, rig.fitScale)
+        rig.gunChild?.position = Position(rig.fitGx, rig.fitGy, rig.fitGz)
+    } else {
+        val turn = def.aim[want] ?: def.carry
+        gun.position = def.pos
+        gun.quaternion = quatXYZ(turn.x, turn.y, turn.z)
+        gun.scale = Float3(def.scale, def.scale, def.scale)
+        rig.gunChild?.position = def.grip
+    }
 
     if (rig.shooting) {
         if (activeModel != null && rig.gunLoaded && handWorld(engine, activeModel, rig.hand)) {
@@ -892,7 +983,7 @@ private fun stepGame(
         muzzleFlash.isVisible = false
     }
 
-    // Deathmatch / Team Deathmatch: bots think, shoot, die, respawn. Then they are drawn.
+    // Deathmatch / Team Deathmatch / Capture the Flag: bots think, shoot, die, respawn. Then they are drawn.
     if (mt != null) {
         mt.update(dt, rig)
         stepBots(dt, rig, mt, botViews, botBullets, engine)
@@ -902,6 +993,7 @@ private fun stepGame(
         if (mt.over) rig.paused = true      // match finished: freeze the game, the HUD shows the result
     }
     updateFx(dt, rig, fxNodes)
+    updateFlags(mt, flagNodes, nanos)
 
     // Follow camera. Normal: behind him (distance = pinch zoom). Scoped: at his shoulder.
     val dist = if (rig.scopeOn) SCOPE_DIST else CAM_DIST * rig.zoom
@@ -910,6 +1002,42 @@ private fun stepGame(
     val camY = rig.y + rig.jumpH * 0.4f
     cameraNode.position = Position(rig.x - fx * back, camY + CAM_HEIGHT + dist * sin(pr), rig.z - fz * back)
     cameraNode.lookAt(Position(rig.x + fx * CAM_LOOK_AHEAD, camY + CAM_LOOK_Y, rig.z + fz * CAM_LOOK_AHEAD))
+}
+
+// ---------------- Capture the Flag: draw the two flags ----------------
+
+// nodes = 4 per team: pole, cloth, beam, base plate (team 0 first). Positions come from MatchState.
+private fun updateFlags(mt: MatchState?, nodes: List<CubeNode>, nanos: Long) {
+    if (mt == null || !mt.ctf) {
+        for (n in nodes) if (n.isVisible) n.isVisible = false
+        return
+    }
+    val t = nanos / 1_000_000_000f
+    for (team in 0..1) {
+        val o = team * FLAG_NODES_PER_TEAM
+        val pole = nodes[o]
+        val cloth = nodes[o + 1]
+        val beam = nodes[o + 2]
+        val plate = nodes[o + 3]
+        val x = mt.flagX[team]
+        val y = mt.flagY[team]
+        val z = mt.flagZ[team]
+        val s = if (mt.flagState[team] == F_CARRIED) 0.65f else 1f      // smaller on somebody's back
+
+        pole.position = Position(x, y + 1.1f * s, z)
+        pole.scale = Float3(s, s, s)
+        cloth.position = Position(x + 0.38f * s, y + 1.9f * s, z)
+        cloth.rotation = Rotation(y = sin(t * 3f + team * 1.7f) * 14f)  // the cloth waves a little
+        cloth.scale = Float3(s, s, s)
+        beam.position = Position(x, y + 4.5f, z)
+        plate.position = Position(mt.homeX[team], mt.homeY[team] + 0.03f, mt.homeZ[team])
+        if (!pole.isVisible) {
+            pole.isVisible = true
+            cloth.isVisible = true
+            beam.isVisible = true
+            plate.isVisible = true
+        }
+    }
 }
 
 // ---------------- Bots ----------------
