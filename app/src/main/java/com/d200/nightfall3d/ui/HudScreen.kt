@@ -260,12 +260,13 @@ fun HudScreen(api: GameApi, onExit: () -> Unit) {
     val guns = owned.filter { !isMelee(it.category) }.take(6)
     val melees = owned.filter { isMelee(it.category) }.take(6)
 
-    // The gun picked on the Weapons screen is the gun he starts with.
-    val gunList = remember { gunNames() }
+    // Only the guns picked on the Weapons screen (max 5) are in his list. The first one is his starting gun.
+    val allGuns = remember { gunNames() }
+    val gunList = remember { GunLoadout.names(allGuns) }
     val startGun = remember { gunList.indexOf(api.equippedWeaponId).let { if (it < 0) 0 else it } }
 
     // The one object the 3D game reads. The buttons below write into it.
-    val input = remember { GameInput().also { it.gunWanted = startGun } }
+    val input = remember { GameInput().also { it.gunWanted = allGuns.indexOf(gunList[startGun]).coerceAtLeast(0) } }
     // the character picked on the Character screen (blue is the only real one for now)
     val pickedGlb = api.characters().firstOrNull { it.id == api.selectedCharacterId }?.glbPath ?: "char_blue.glb"
     val charIndex = CHAR_FILES.indexOf(pickedGlb).let { if (it < 0) 0 else it }
@@ -550,7 +551,7 @@ fun HudScreen(api: GameApi, onExit: () -> Unit) {
                                     meleeIdx = i - 1
                                 } else {
                                     gunIdx = i
-                                    input.gunWanted = i      // puts that gun in his hand
+                                    input.gunWanted = allGuns.indexOf(name).coerceAtLeast(0)      // puts that gun in his hand
                                     api.equippedWeaponId = name
                                 }
                                 menuOpen = false
