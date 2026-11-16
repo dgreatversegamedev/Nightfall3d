@@ -68,6 +68,8 @@ import kotlin.random.Random
 //     thicker, and a bright spot flashes where it was hit.
 //  3) BLOOD: many small dark red drops (64) that fly out, fall, and become flat blood spots on the floor for a
 //     moment. Sparks stay orange. A bullet that hits your shield makes sparks, not blood.
+//  4) RIFLE and CARBINE are the right size now (scale 0.5 and 0.42) and use the grip / turn numbers fitted
+//     in gun-size-fitter.html.
 //
 // EARLIER
 //  - Capture the Flag drawing from MatchLogic.kt (MatchState), long glowing tracers, muzzle flash, scope (GunDef.hasScope).
@@ -208,14 +210,13 @@ internal val GUNS = listOf(
             "run_shoot" to GunTurn(-167f, 31f, -37f)
         )
     ),
-    // rifle.glb. Fit numbers are copied from the AR for now, so the hold may look a little off until it is fitted
-    // (use the FIT button in the HUD). hasScope = true is a guess; set it to false if it has no scope.
+    // rifle.glb (sniper with scope). Size and grip fitted in gun-size-fitter.html (about 0.9 m long on the 1.8 m character).
     GunDef(
         name = "Rifle",
         file = "rifle.glb",
         pos = Position(0.005f, 0.06f, 0.025f),
-        scale = 0.24f,
-        grip = Position(0.049f, 0.191f, 0.394f),
+        scale = 0.5f,
+        grip = Position(0.3f, 0.015f, 0.394f),
         carry = GunTurn(-130f, 51f, -37f),
         aim = mapOf(
             "shoot" to GunTurn(-148f, 16f, -45f),
@@ -224,17 +225,17 @@ internal val GUNS = listOf(
         ),
         hasScope = true
     ),
-    // carbine.glb. Same temporary fit numbers as the AR.
+    // carbine.glb. Size and grip fitted in gun-size-fitter.html (about 0.76 m long on the 1.8 m character).
     GunDef(
         name = "Carbine",
         file = "carbine.glb",
         pos = Position(0.005f, 0.06f, 0.025f),
-        scale = 0.24f,
-        grip = Position(0.049f, 0.191f, 0.394f),
+        scale = 0.42f,
+        grip = Position(-0.055f, 0.085f, 0.28f),
         carry = GunTurn(-130f, 51f, -37f),
         aim = mapOf(
             "shoot" to GunTurn(-148f, 16f, -45f),
-            "walk_shoot" to GunTurn(-142f, 11f, -48f),
+            "walk_shoot" to GunTurn(-124f, 11f, -48f),
             "run_shoot" to GunTurn(-167f, 31f, -37f)
         )
     )
