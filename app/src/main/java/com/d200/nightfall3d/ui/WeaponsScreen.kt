@@ -9,6 +9,7 @@ import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateListOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
@@ -24,13 +25,28 @@ import com.d200.nightfall3d.ui.theme.*
 // =====================================================================
 // WeaponsScreen.kt
 // Lists every gun that is uploaded into the game (the GUNS list in Game3DView.kt).
-// Add a gun there and it shows up here by itself. TEST MODE: no buying, every gun can be equipped.
-// One colour only: the damage green. Everything else is dark.
+// Add a gun there and it shows up here by itself. TEST MODE: no buying.
 //
+// LOADOUT: you can select only 5 weapons for now (GunLoadout.MAX). The count is shown at the bottom.
+// The guns you select are the guns in your list during a match (the MP5 card on the match screen).
+// The first gun you selected is the gun you start the match with.
+//
+// One colour only: the damage green. Everything else is dark.
 // TO GIVE A GUN ITS REAL INFO, edit GUN_INFO below (category, text, and 4 numbers from 0 to 1).
 // A gun that is not in GUN_INFO still shows up (as a RIFLE with middle numbers).
-// The gun you equip here is the gun you start the match with.
 // =====================================================================
+
+/** The guns the player selected (max 5). The match screen reads this. */
+object GunLoadout {
+    const val MAX = 5
+    var picked: List<String> = emptyList()
+
+    /** The selected guns that really exist. If nothing was selected yet, the first 5 uploaded guns. */
+    fun names(all: List<String>): List<String> {
+        val ok = picked.filter { it in all }.distinct().take(MAX)
+        return if (ok.isEmpty()) all.take(MAX) else ok
+    }
+}
 
 private class GunInfo(
     val category: String,
@@ -65,12 +81,21 @@ fun WeaponsScreen(api: GameApi, onBack: () -> Unit, onOpen: (String) -> Unit) {
     val rows = remember { names.map { gunRow(it) } }
     val tabs = listOf("ALL", "RIFLE", "SMG", "SHOTGUN", "SNIPER", "MELEE", "OTHERS")
     var tab by remember { mutableStateOf(0) }
-    var equipped by remember {
-        mutableStateOf(if (api.equippedWeaponId in names) api.equippedWeaponId else (names.firstOrNull() ?: ""))
-    }
-    var selName by remember { mutableStateOf(equipped) }
+    val picked = remember { mutableStateListOf<String>().apply { addAll(GunLoadout.names(names)) } }
+    var selName by remember { mutableStateOf(picked.firstOrNull() ?: (names.firstOrNull() ?: "")) }
     val list = if (tab == 0) rows else rows.filter { it.info.category.equals(tabs[tab], ignoreCase = true) }
     val sel = rows.firstOrNull { it.name == selName } ?: rows.firstOrNull()
+
+    // select / unselect a gun, keep the loadout for the match
+    fun toggle(name: String) {
+        if (name in picked) {
+            if (picked.size > 1) picked.remove(name)
+        } else if (picked.size < GunLoadout.MAX) {
+            picked.add(name)
+        }
+        GunLoadout.picked = picked.toList()
+        if (picked.isNotEmpty()) api.equippedWeaponId = picked.first()
+    }
 
     Box(
         Modifier
@@ -127,7 +152,7 @@ fun WeaponsScreen(api: GameApi, onBack: () -> Unit, onOpen: (String) -> Unit) {
                                 GunCard(
                                     g,
                                     g.name == selName,
-                                    g.name == equipped,
+                                    g.name in picked,
                                     Modifier.weight(1f).height(104.dp)
                                 ) { selName = g.name }
                             }
@@ -167,30 +192,44 @@ fun WeaponsScreen(api: GameApi, onBack: () -> Unit, onOpen: (String) -> Unit) {
                         GreenBar("Accuracy", sel.info.accuracy)
                         GreenBar("Magazine", sel.info.magazine)
                         Spacer(Modifier.weight(1f))
-                        val isEq = sel.name == equipped
+
+                        val isPicked = sel.name in picked
+                        val full = picked.size >= GunLoadout.MAX
+                        // SELECT is green. REMOVE, and SELECT when the 5 are full, are dark.
+                        val canClick = if (isPicked) picked.size > 1 else !full
+                        val greenButton = !isPicked && !full
+                        val label = if (isPicked) "REMOVE" else if (full) "5 / 5 FULL" else "SELECT"
                         val btnShape = RoundedCornerShape(6.dp)
                         Box(
                             Modifier
                                 .fillMaxWidth()
                                 .height(44.dp)
                                 .clip(btnShape)
-                                .background(if (isEq) CardBg else NfColors.Green)
-                                .border(1.dp, NfColors.Green, btnShape)
-                                .clickable(enabled = !isEq) {
-                                    equipped = sel.name
-                                    api.equippedWeaponId = sel.name
-                                },
+                                .background(if (greenButton) NfColors.Green else CardBg)
+                                .border(1.dp, if (canClick) NfColors.Green else LineColor, btnShape)
+                                .clickable(enabled = canClick) { toggle(sel.name) },
                             contentAlignment = Alignment.Center
                         ) {
                             NfText(
-                                if (isEq) "EQUIPPED" else "EQUIP",
+                                label,
                                 size = 14,
                                 bold = true,
-                                color = if (isEq) NfColors.Green else Color(0xFF04100A)
+                                color = if (greenButton) Color(0xFF04100A) else if (canClick) NfColors.Green else DimText
                             )
                         }
                     }
                 }
+            }
+
+            // bottom: how many weapons are selected
+            Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(12.dp)) {
+                NfText(
+                    "Selected ${picked.size} / ${GunLoadout.MAX} weapons",
+                    size = 14,
+                    bold = true,
+                    color = NfColors.Green
+                )
+                NfText("You can only select ${GunLoadout.MAX} weapons for now.", size = 12, color = DimText)
             }
         }
     }
@@ -200,7 +239,7 @@ fun WeaponsScreen(api: GameApi, onBack: () -> Unit, onOpen: (String) -> Unit) {
 private fun GunCard(
     g: GunRow,
     selected: Boolean,
-    equipped: Boolean,
+    inLoadout: Boolean,
     modifier: Modifier,
     onClick: () -> Unit
 ) {
@@ -223,7 +262,7 @@ private fun GunCard(
             color = DimText,
             bold = true
         )
-        if (equipped) {
+        if (inLoadout) {
             NfIcon(
                 NfIconKind.CHECK,
                 Modifier.align(Alignment.TopEnd).padding(8.dp).size(14.dp),
@@ -232,8 +271,8 @@ private fun GunCard(
         }
         Column(Modifier.align(Alignment.BottomStart).padding(8.dp)) {
             NfText(g.name, size = 12, bold = true)
-            if (equipped) {
-                NfText("Equipped", size = 11, color = NfColors.Green, bold = true)
+            if (inLoadout) {
+                NfText("Selected", size = 11, color = NfColors.Green, bold = true)
             }
         }
     }
