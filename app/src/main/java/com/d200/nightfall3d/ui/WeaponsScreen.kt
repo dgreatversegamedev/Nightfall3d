@@ -1,5 +1,6 @@
 package com.d200.nightfall3d.ui
 
+import android.util.Log
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
@@ -9,6 +10,7 @@ import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.key
 import androidx.compose.runtime.mutableStateListOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
@@ -18,22 +20,37 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.unit.dp
+import com.d200.nightfall3d.game.GUNS
 import com.d200.nightfall3d.game.GameApi
 import com.d200.nightfall3d.game.gunNames
 import com.d200.nightfall3d.ui.theme.*
+import com.google.android.filament.Engine
+import com.google.android.filament.IndirectLight
+import com.google.android.filament.Skybox
+import io.github.sceneview.Scene
+import io.github.sceneview.environment.Environment
+import io.github.sceneview.loaders.ModelLoader
+import io.github.sceneview.math.Position
+import io.github.sceneview.math.Rotation
+import io.github.sceneview.node.ModelNode
+import io.github.sceneview.rememberCameraNode
+import io.github.sceneview.rememberEngine
+import io.github.sceneview.rememberModelLoader
+import io.github.sceneview.rememberNodes
 
 // =====================================================================
 // WeaponsScreen.kt
 // Lists every gun that is uploaded into the game (the GUNS list in Game3DView.kt).
 // Add a gun there and it shows up here by itself. TEST MODE: no buying.
 //
-// LOADOUT: you can select only 5 weapons for now (GunLoadout.MAX). The count is shown at the bottom.
-// The guns you select are the guns in your list during a match (the MP5 card on the match screen).
-// The first gun you selected is the gun you start the match with.
+// CHANGES IN THIS VERSION (Build 1 fixes)
+//  1) Each gun is shown with its REAL 3D model (the same .glb file the game uses, so the app does not get bigger).
+//     The cards turn slowly; the big preview on the right turns too.
+//  2) The SELECT / REMOVE button is always full size (52 dp) and pinned at the bottom. Only the info above it scrolls.
+//  3) Orange accent (was green).
 //
-// One colour only: the damage green. Everything else is dark.
-// TO GIVE A GUN ITS REAL INFO, edit GUN_INFO below (category, text, and 4 numbers from 0 to 1).
-// A gun that is not in GUN_INFO still shows up (as a RIFLE with middle numbers).
+// LOADOUT: you can select only 5 weapons for now (GunLoadout.MAX). The first one selected is the starting gun.
+// TO GIVE A GUN ITS REAL INFO, edit GUN_INFO below.
 // =====================================================================
 
 /** The guns the player selected (max 5). The match screen reads this. */
@@ -61,13 +78,20 @@ private class GunInfo(
 private val GUN_INFO = mapOf(
     "MP5" to GunInfo("SMG", "Sub machine gun.", 0.5f, 0.5f, 0.5f, 0.5f),
     "AK-47" to GunInfo("Rifle", "Classic and reliable.", 0.5f, 0.5f, 0.5f, 0.5f),
-    "AR" to GunInfo("Rifle", "Assault rifle.", 0.5f, 0.5f, 0.5f, 0.5f)
+    "AR" to GunInfo("Rifle", "Assault rifle.", 0.5f, 0.5f, 0.5f, 0.5f),
+    "Rifle" to GunInfo("Sniper", "Long range rifle with scope.", 0.8f, 0.9f, 0.8f, 0.3f),
+    "Carbine" to GunInfo("Rifle", "Light and fast carbine.", 0.45f, 0.45f, 0.55f, 0.6f)
 )
 
-private class GunRow(val name: String, val info: GunInfo)
+private class GunRow(val name: String, val file: String, val info: GunInfo)
 
-private fun gunRow(name: String) = GunRow(name, GUN_INFO[name] ?: GunInfo("Rifle", "", 0.5f, 0.5f, 0.5f, 0.5f))
+private fun gunRow(name: String): GunRow {
+    val file = GUNS.firstOrNull { it.name == name }?.file ?: ""
+    return GunRow(name, file, GUN_INFO[name] ?: GunInfo("Rifle", "", 0.5f, 0.5f, 0.5f, 0.5f))
+}
 
+private val Accent = Color(0xFFFF8A00)          // Nightfall orange
+private val OnAccent = Color(0xFF1A0E00)        // dark text on an orange button
 private val ScreenBg = Color(0xFF080B0A)
 private val PanelBg = Color(0xFF0E1311)
 private val CardBg = Color(0xFF111614)
@@ -85,6 +109,19 @@ fun WeaponsScreen(api: GameApi, onBack: () -> Unit, onOpen: (String) -> Unit) {
     var selName by remember { mutableStateOf(picked.firstOrNull() ?: (names.firstOrNull() ?: "")) }
     val list = if (tab == 0) rows else rows.filter { it.info.category.equals(tabs[tab], ignoreCase = true) }
     val sel = rows.firstOrNull { it.name == selName } ?: rows.firstOrNull()
+
+    // ONE 3D engine shared by every gun picture on this screen (light on memory)
+    val engine = rememberEngine()
+    val modelLoader = rememberModelLoader(engine)
+    val environment = remember(engine) {
+        Environment(
+            indirectLight = IndirectLight.Builder()
+                .irradiance(1, floatArrayOf(1f, 1f, 1f))
+                .intensity(30_000f)
+                .build(engine),
+            skybox = Skybox.Builder().color(0.067f, 0.086f, 0.078f, 1f).build(engine)   // same dark as the cards
+        )
+    }
 
     // select / unselect a gun, keep the loadout for the match
     fun toggle(name: String) {
@@ -121,13 +158,13 @@ fun WeaponsScreen(api: GameApi, onBack: () -> Unit, onOpen: (String) -> Unit) {
                         },
                         horizontalAlignment = Alignment.CenterHorizontally
                     ) {
-                        NfText(t, size = 13, bold = true, color = if (on) NfColors.Green else DimText)
+                        NfText(t, size = 13, bold = true, color = if (on) Accent else DimText)
                         Spacer(Modifier.height(4.dp))
                         Box(
                             Modifier
                                 .width(34.dp)
                                 .height(2.dp)
-                                .background(if (on) NfColors.Green else Color.Transparent)
+                                .background(if (on) Accent else Color.Transparent)
                         )
                     }
                 }
@@ -137,7 +174,7 @@ fun WeaponsScreen(api: GameApi, onBack: () -> Unit, onOpen: (String) -> Unit) {
                 Modifier.fillMaxWidth().weight(1f),
                 horizontalArrangement = Arrangement.spacedBy(14.dp)
             ) {
-                // left: the uploaded guns
+                // left: the uploaded guns (real 3D pictures)
                 Column(
                     Modifier.weight(1.5f).fillMaxHeight().verticalScroll(rememberScrollState()),
                     verticalArrangement = Arrangement.spacedBy(8.dp)
@@ -153,7 +190,8 @@ fun WeaponsScreen(api: GameApi, onBack: () -> Unit, onOpen: (String) -> Unit) {
                                     g,
                                     g.name == selName,
                                     g.name in picked,
-                                    Modifier.weight(1f).height(104.dp)
+                                    engine, modelLoader, environment,
+                                    Modifier.weight(1f).height(110.dp)
                                 ) { selName = g.name }
                             }
                             repeat(3 - row.size) { Spacer(Modifier.weight(1f)) }
@@ -161,7 +199,7 @@ fun WeaponsScreen(api: GameApi, onBack: () -> Unit, onOpen: (String) -> Unit) {
                     }
                 }
 
-                // right: details
+                // right: details. The info scrolls, the button stays big at the bottom.
                 if (sel != null) {
                     val panelShape = RoundedCornerShape(8.dp)
                     Column(
@@ -171,50 +209,57 @@ fun WeaponsScreen(api: GameApi, onBack: () -> Unit, onOpen: (String) -> Unit) {
                             .clip(panelShape)
                             .background(PanelBg)
                             .border(1.dp, LineColor, panelShape)
-                            .padding(14.dp),
-                        verticalArrangement = Arrangement.spacedBy(8.dp)
+                            .padding(14.dp)
                     ) {
-                        NfText(sel.name, size = 24, bold = true)
-                        if (sel.info.description.isNotEmpty()) {
-                            NfText(sel.info.description, size = 12, color = DimText)
-                        }
-                        Box(
-                            Modifier
-                                .fillMaxWidth()
-                                .clip(RoundedCornerShape(6.dp))
-                                .background(CardBg)
-                                .padding(6.dp)
+                        Column(
+                            Modifier.weight(1f).fillMaxWidth().verticalScroll(rememberScrollState()),
+                            verticalArrangement = Arrangement.spacedBy(8.dp)
                         ) {
-                            GunSilhouette(Modifier.fillMaxWidth().height(80.dp), Color(0xFF8E9894))
+                            NfText(sel.name, size = 24, bold = true)
+                            if (sel.info.description.isNotEmpty()) {
+                                NfText(sel.info.description, size = 12, color = DimText)
+                            }
+                            Box(
+                                Modifier
+                                    .fillMaxWidth()
+                                    .height(120.dp)
+                                    .clip(RoundedCornerShape(6.dp))
+                                    .background(CardBg)
+                            ) {
+                                key(sel.name) {
+                                    GunPicture(engine, modelLoader, environment, sel.file, Modifier.fillMaxSize(), 0f)
+                                }
+                            }
+                            AccentBar("Damage", sel.info.damage)
+                            AccentBar("Range", sel.info.range)
+                            AccentBar("Accuracy", sel.info.accuracy)
+                            AccentBar("Magazine", sel.info.magazine)
                         }
-                        GreenBar("Damage", sel.info.damage)
-                        GreenBar("Range", sel.info.range)
-                        GreenBar("Accuracy", sel.info.accuracy)
-                        GreenBar("Magazine", sel.info.magazine)
-                        Spacer(Modifier.weight(1f))
+
+                        Spacer(Modifier.height(10.dp))
 
                         val isPicked = sel.name in picked
                         val full = picked.size >= GunLoadout.MAX
-                        // SELECT is green. REMOVE, and SELECT when the 5 are full, are dark.
+                        // SELECT is orange. REMOVE, and SELECT when the 5 are full, are dark.
                         val canClick = if (isPicked) picked.size > 1 else !full
-                        val greenButton = !isPicked && !full
+                        val filled = !isPicked && !full
                         val label = if (isPicked) "REMOVE" else if (full) "5 / 5 FULL" else "SELECT"
-                        val btnShape = RoundedCornerShape(6.dp)
+                        val btnShape = RoundedCornerShape(8.dp)
                         Box(
                             Modifier
                                 .fillMaxWidth()
-                                .height(44.dp)
+                                .height(52.dp)                       // big enough to tap
                                 .clip(btnShape)
-                                .background(if (greenButton) NfColors.Green else CardBg)
-                                .border(1.dp, if (canClick) NfColors.Green else LineColor, btnShape)
+                                .background(if (filled) Accent else CardBg)
+                                .border(1.5.dp, if (canClick) Accent else LineColor, btnShape)
                                 .clickable(enabled = canClick) { toggle(sel.name) },
                             contentAlignment = Alignment.Center
                         ) {
                             NfText(
                                 label,
-                                size = 14,
+                                size = 15,
                                 bold = true,
-                                color = if (greenButton) Color(0xFF04100A) else if (canClick) NfColors.Green else DimText
+                                color = if (filled) OnAccent else if (canClick) Accent else DimText
                             )
                         }
                     }
@@ -227,7 +272,7 @@ fun WeaponsScreen(api: GameApi, onBack: () -> Unit, onOpen: (String) -> Unit) {
                     "Selected ${picked.size} / ${GunLoadout.MAX} weapons",
                     size = 14,
                     bold = true,
-                    color = NfColors.Green
+                    color = Accent
                 )
                 NfText("You can only select ${GunLoadout.MAX} weapons for now.", size = 12, color = DimText)
             }
@@ -235,11 +280,59 @@ fun WeaponsScreen(api: GameApi, onBack: () -> Unit, onOpen: (String) -> Unit) {
     }
 }
 
+/**
+ * The real gun, drawn from its own .glb (the file already in the game), turning slowly.
+ * If the file is missing it shows the old grey silhouette instead.
+ */
+@Composable
+private fun GunPicture(
+    engine: Engine,
+    modelLoader: ModelLoader,
+    environment: Environment,
+    file: String,
+    modifier: Modifier,
+    startYaw: Float
+) {
+    val node = remember(file) {
+        try {
+            ModelNode(
+                modelInstance = modelLoader.createModelInstance(file),
+                autoAnimate = false,
+                scaleToUnits = 1f,                        // every gun fits the same size
+                centerOrigin = Position(0f, 0f, 0f)       // turn around its middle
+            )
+        } catch (e: Throwable) {
+            Log.e("WeaponsScreen", "Could not load $file", e)
+            null
+        }
+    }
+    if (node == null) {
+        GunSilhouette(modifier, Color(0xFF8E9894))
+        return
+    }
+    val cameraNode = rememberCameraNode(engine) { position = Position(0f, 0f, 1.7f) }
+    val nodes = rememberNodes { add(node) }
+    Scene(
+        modifier = modifier,
+        engine = engine,
+        modelLoader = modelLoader,
+        cameraNode = cameraNode,
+        childNodes = nodes,
+        environment = environment,
+        onFrame = { nanos ->
+            node.rotation = Rotation(y = (startYaw + nanos / 1_000_000_000f * 35f) % 360f)
+        }
+    )
+}
+
 @Composable
 private fun GunCard(
     g: GunRow,
     selected: Boolean,
     inLoadout: Boolean,
+    engine: Engine,
+    modelLoader: ModelLoader,
+    environment: Environment,
     modifier: Modifier,
     onClick: () -> Unit
 ) {
@@ -248,13 +341,15 @@ private fun GunCard(
         modifier
             .clip(shape)
             .background(CardBg)
-            .border(if (selected) 1.5.dp else 1.dp, if (selected) NfColors.Green else LineColor, shape)
-            .clickable { onClick() }
+            .border(if (selected) 1.5.dp else 1.dp, if (selected) Accent else LineColor, shape)
     ) {
-        GunSilhouette(
-            Modifier.align(Alignment.Center).fillMaxWidth(0.8f).fillMaxHeight(0.5f),
-            Color(0xFF8E9894)
+        GunPicture(
+            engine, modelLoader, environment, g.file,
+            Modifier.align(Alignment.Center).fillMaxWidth(0.85f).fillMaxHeight(0.62f),
+            0f
         )
+        // transparent layer on top, so a tap on the picture also selects the card
+        Box(Modifier.matchParentSize().clickable { onClick() })
         NfText(
             g.info.category.uppercase(),
             modifier = Modifier.align(Alignment.TopStart).padding(8.dp),
@@ -266,21 +361,21 @@ private fun GunCard(
             NfIcon(
                 NfIconKind.CHECK,
                 Modifier.align(Alignment.TopEnd).padding(8.dp).size(14.dp),
-                NfColors.Green
+                Accent
             )
         }
         Column(Modifier.align(Alignment.BottomStart).padding(8.dp)) {
             NfText(g.name, size = 12, bold = true)
             if (inLoadout) {
-                NfText("Selected", size = 11, color = NfColors.Green, bold = true)
+                NfText("Selected", size = 11, color = Accent, bold = true)
             }
         }
     }
 }
 
-/** One stat: name on the left, thin bar on the right. Always the same green. */
+/** One stat: name on the left, thin bar on the right. Always the same orange. */
 @Composable
-private fun GreenBar(label: String, value: Float) {
+private fun AccentBar(label: String, value: Float) {
     Row(verticalAlignment = Alignment.CenterVertically) {
         NfText(label, Modifier.width(78.dp), size = 12, color = DimText)
         Box(
@@ -294,7 +389,7 @@ private fun GreenBar(label: String, value: Float) {
                 Modifier
                     .fillMaxWidth(value.coerceIn(0f, 1f))
                     .fillMaxHeight()
-                    .background(NfColors.Green)
+                    .background(Accent)
             )
         }
     }
