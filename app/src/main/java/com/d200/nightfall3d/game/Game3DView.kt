@@ -34,8 +34,10 @@ import io.github.sceneview.environment.Environment
 import io.github.sceneview.math.Position
 import io.github.sceneview.math.Rotation
 import io.github.sceneview.node.CubeNode
+import io.github.sceneview.node.CylinderNode
 import io.github.sceneview.node.ModelNode
 import io.github.sceneview.node.Node
+import io.github.sceneview.node.SphereNode
 import io.github.sceneview.rememberCameraNode
 import io.github.sceneview.rememberEngine
 import io.github.sceneview.rememberMaterialLoader
@@ -44,6 +46,7 @@ import io.github.sceneview.rememberNodes
 import kotlin.math.PI
 import kotlin.math.abs
 import kotlin.math.acos
+import kotlin.math.atan
 import kotlin.math.ceil
 import kotlin.math.exp
 import kotlin.math.atan2
@@ -61,76 +64,66 @@ import kotlin.random.Random
 // The HUD (HudScreen.kt) only writes into one GameInput object (see the class below).
 //
 // Needs in app/src/main/assets/ : arena_play.glb, arena_play.json, char_blue.glb
-// Optional (gun in hand): mp5_gun.glb, ak47_gun.glb, ar_gun.glb, rifle.glb, carbine.glb  (the game still works without them)
+// Optional (gun in hand): mp5_gun.glb, ak47_gun.glb, ar_gun.glb, rifle.glb, carbine.glb
 //
 // CHANGES IN THIS VERSION
-//  1) FLAGS look military now: dark steel pole with a finial, a banner made of 4 waving cloth pieces with a dark
-//     stripe pattern, a dark pedestal with a glowing frame around it (the capture zone) and a thin light beam.
-//     (FLAG_NODES_PER_TEAM = 12 nodes for each team.)
-//  2) (OLD) SHIELD was a glass honeycomb: very thin pale bars (the 90 edges of the hexagon / pentagon ball). When a
-//     bullet hits it, a ring of light spreads out from the hit spot over the shield, the bars near the ring glow
-//     thicker, and a bright spot flashes where it was hit.
-//  3) BLOOD: many small dark red drops (64) that fly out, fall, and become flat blood spots on the floor for a
-//     moment. Sparks stay orange. A bullet that hits your shield makes sparks, not blood.
-//  4) RIFLE and CARBINE are the right size now (scale 0.5 and 0.42) and use the grip / turn numbers fitted
-//     in gun-size-fitter.html.
-//
-// EARLIER
-//  - Capture the Flag drawing from MatchLogic.kt (MatchState), long glowing tracers, muzzle flash, scope (GunDef.hasScope).
-//  - GUN FIT MODE: rig.fitOn (used by a fit panel in the HUD, if you add one).
+//  1) SHIELD is now a SOLID energy bubble: a blue glowing translucent ball (so you really look "inside" a shield and
+//     everything behind it is tinted blue), a soft outer glow layer, thick glowing hex lines on the surface, and a
+//     glowing disc on the floor under your feet. A hit flashes the whole ball bright and rolls a ripple over it.
+//  2) FLAGS now have a real cloth banner: 24 thin overlapping strips, each one leaning along the wave, so it reads as
+//     one smooth waving cloth (not 10 separate rectangles).
 // =====================================================================
 
 // ---- Tuning numbers: change these if something looks wrong ----
-private const val CHAR_HEIGHT = 1.8f      // character size in meters
-private const val FACING_OFFSET = 0f      // if he walks sideways/backwards, try 90f, 180f or -90f
+private const val CHAR_HEIGHT = 1.8f
+private const val FACING_OFFSET = 0f
 private const val WALK_SPEED = 2.2f
-private const val TURN_SPEED = 540f       // degrees per second he turns toward where he walks
-private const val AIM_TURN_SPEED = 1080f  // degrees per second he turns toward where he aims
-private const val ACCEL = 9f              // how fast he speeds up / slows down
-private const val BLEND_TIME = 0.25f      // seconds to blend between animations
-private const val BLEND_FLIP = false      // if the blend looks backwards (pops at the end), change to true
+private const val TURN_SPEED = 540f
+private const val AIM_TURN_SPEED = 1080f
+private const val ACCEL = 9f
+private const val BLEND_TIME = 0.25f
+private const val BLEND_FLIP = false
 private const val RUN_SPEED = 4.6f
-private const val CAM_DIST = 3.2f         // how far behind him (pinch with two fingers to change)
-private const val CAM_HEIGHT = 1.5f       // camera height (chest level, always)
-private const val CAM_LOOK_AHEAD = 6f     // looks this far in front of him
-private const val CAM_LOOK_Y = 1.0f       // height of the point the camera looks at
-private const val ZOOM_MIN = 0.4f         // closest (pinch out)
-private const val ZOOM_MAX = 3f           // farthest (pinch in)
-private const val CAM_DRAG_SPEED = 0.25f  // degrees of camera turn per pixel dragged
-private const val CAM_PITCH_SPEED = 0.2f  // degrees of camera tilt per pixel dragged up/down
-private const val CAM_PITCH_MAX = 55f     // highest the camera can go (degrees above chest level)
-private const val AIM_DEADZONE = 0.15f    // aim stick: pushed less than this = no aim yet
-private const val BACKPEDAL_DOT = -0.2f   // moving against his facing by this much = play the walk backward
+private const val CAM_DIST = 3.2f
+private const val CAM_HEIGHT = 1.5f
+private const val CAM_LOOK_AHEAD = 6f
+private const val CAM_LOOK_Y = 1.0f
+private const val ZOOM_MIN = 0.4f
+private const val ZOOM_MAX = 3f
+private const val CAM_DRAG_SPEED = 0.25f
+private const val CAM_PITCH_SPEED = 0.2f
+private const val CAM_PITCH_MAX = 55f
+private const val AIM_DEADZONE = 0.15f
+private const val BACKPEDAL_DOT = -0.2f
 private const val RAD_TO_DEG = 180f / PI.toFloat()
 private const val DEG_TO_RAD = PI.toFloat() / 180f
 
 // ---- Scope ----
-private const val SCOPE_DIST = 0.35f      // camera distance behind him while scoped (small = over the shoulder)
-private const val SCOPE_DRAG = 0.4f       // camera turns slower while scoped (steady aim)
+private const val SCOPE_DIST = 0.35f
+private const val SCOPE_DRAG = 0.4f
 
 // ---- Bullets ----
 private const val BULLET_COUNT = 24
-private const val BULLET_SPEED = 40f          // meters per second
-private const val BULLET_RANGE = 50f          // bullet disappears after this distance
-private const val FIRE_INTERVAL = 0.12f       // seconds between shots while the fire stick is held
-private const val MUZZLE_FORWARD = 0.5f       // bullet starts this far in front of the HAND
-private const val AIM_POINT_DIST = 12f        // the bullet aims at the point this far from him along the ring direction
-private const val BULLET_THICK = 0.03f        // tracer thickness (meters)
-private const val BULLET_LEN = 0.9f           // tracer length (meters). Longer = more like a streak
-private const val FLASH_TIME = 0.06f          // how long the muzzle flash stays (seconds)
-// Fallback only (used if the hand position cannot be read)
+private const val BULLET_SPEED = 40f
+private const val BULLET_RANGE = 50f
+private const val FIRE_INTERVAL = 0.12f
+private const val MUZZLE_FORWARD = 0.5f
+private const val AIM_POINT_DIST = 12f
+private const val BULLET_THICK = 0.03f
+private const val BULLET_LEN = 0.9f
+private const val FLASH_TIME = 0.06f
 private const val BULLET_HEIGHT = 1.15f
 private const val BULLET_START_FORWARD = 0.9f
 private const val BULLET_START_SIDE = 0.25f
 
-// ---- Hit effects (sparks on walls / shield, blood on fighters) ----
-private const val FX_HALF = 24                // first 24 = sparks, the rest = blood
-private const val FX_COUNT = 88               // 24 sparks + 64 blood drops
-private const val BLOOD_PIECES = 14           // drops for one bullet hit
+// ---- Hit effects ----
+private const val FX_HALF = 24
+private const val FX_COUNT = 88
+private const val BLOOD_PIECES = 14
 private const val SPARK_PIECES = 5
 
 // ---- Gun in the right hand ----
-private const val RIGHT_HAND_JOINT = 14          // position of the right hand in the skeleton list
+private const val RIGHT_HAND_JOINT = 14
 
 // ---- Punch and jump ----
 private const val PUNCH_LEN = 0.5f
@@ -139,21 +132,21 @@ private const val JUMP_CLIP = "jump_inplace"
 private const val CROUCH_POSE_T = 0.40f
 private const val CROUCH_SPEED = 1.2f
 
-// ---- Shield: glass honeycomb (12 pentagons + 20 hexagons = 90 edges) ----
-private const val SHIELD_R = 1.1f             // bubble radius (meters)
-private const val SHIELD_CY = 0.9f            // bubble centre height
-private const val SHIELD_EDGE_THICK = 0.016f  // thickness of each energy line
-private const val SHIELD_FREQ = 3             // 3 = 92 cells (about 25 cm each). 4 = 162 cells (smaller, but heavier). Try 4 if your phone is fast.
-private const val SHIELD_MAX_HITS = 25f       // bullets the shield takes before it breaks
-private const val SHIELD_REVIVE_SEC = 20f     // seconds until the broken shield comes back
-private const val SHIELD_BREAK_TIME = 0.55f   // length of the shatter animation
-private const val SHIELD_APPEAR_TIME = 0.45f  // length of the grow-in animation
-private const val M_SHINE = 5                 // material numbers (see shieldNodes)
+// ---- Shield: solid energy bubble + glowing hex lines ----
+private const val SHIELD_R = 1.1f
+private const val SHIELD_CY = 0.9f
+private const val SHIELD_EDGE_THICK = 0.034f  // thick glowing hex lines (was 0.016)
+private const val SHIELD_FREQ = 3
+private const val SHIELD_MAX_HITS = 25f
+private const val SHIELD_REVIVE_SEC = 20f
+private const val SHIELD_BREAK_TIME = 0.55f
+private const val SHIELD_APPEAR_TIME = 0.45f
+private const val M_SHINE = 5
 private const val M_HOT = 6
 private const val M_AMBER = 7
-private const val SHIELD_HIT_TIME = 0.7f      // how long the hit ripple lasts (same number in MatchLogic.kt)
-private const val RIPPLE_RING = 16            // light spots in the ripple ring
-private const val RIPPLE_COUNT = RIPPLE_RING + 1   // + 1 bright spot where the bullet hit
+private const val SHIELD_HIT_TIME = 0.7f
+private const val RIPPLE_RING = 16
+private const val RIPPLE_COUNT = RIPPLE_RING + 1
 private const val JUMP_LEN = 0.5f
 private const val JUMP_TAKEOFF_T = 0.1406f
 private const val JUMP_LAND_T = 0.3594f
@@ -161,33 +154,30 @@ private const val JUMP_SPEED = 8f
 private const val GRAVITY = 24f
 
 // ---- Capture the Flag drawing ----
-// 18 nodes per team: 0 pole | 1 finial | 2..11 banner strips | 12 pedestal | 13..16 base frame bars | 17 light beam
-private const val FLAG_STRIPS = 10             // the banner is 10 narrow strips = smooth waving cloth
-private const val FLAG_STRIP_W = 0.075f
-private const val FL_STRIP = 2                  // first strip node
-private const val FL_PED = FL_STRIP + FLAG_STRIPS   // pedestal
-private const val FL_FRAME = FL_PED + 1         // 4 frame bars
-private const val FL_BEAM = FL_FRAME + 4        // light beam
-private const val FLAG_NODES_PER_TEAM = FL_BEAM + 1 // 18
+// nodes per team: 0 pole | 1 finial | strips | pedestal | 4 frame bars | light beam
+private const val FLAG_STRIPS = 24            // the banner is 24 thin strips = smooth waving cloth
+private const val FLAG_STRIP_W = 0.03f
+private const val FLAG_H = 0.55f              // cloth height
+private const val FL_STRIP = 2
+private const val FL_PED = FL_STRIP + FLAG_STRIPS
+private const val FL_FRAME = FL_PED + 1
+private const val FL_BEAM = FL_FRAME + 4
+private const val FLAG_NODES_PER_TEAM = FL_BEAM + 1
 
 // Gun turn (degrees, X/Y/Z)
 internal class GunTurn(val x: Float, val y: Float, val z: Float)
 
-// One gun. pos/scale/grip/carry/aim are the fit numbers for THAT gun (from the gun fit mode in the HUD).
-// hasScope = true only for guns that really have a scope (sniper). The HUD scope button only works for those.
 internal class GunDef(
     val name: String,
     val file: String,
     val pos: Position,
     val scale: Float,
-    val grip: Position,        // moves the gun so the grip sits in the hand
-    val carry: GunTurn,        // idle / walk / run
-    val aim: Map<String, GunTurn>,   // muzzle straight forward while shooting
+    val grip: Position,
+    val carry: GunTurn,
+    val aim: Map<String, GunTurn>,
     val hasScope: Boolean = false
 )
 
-// ADD NEW GUNS HERE (one entry each). For a sniper add  hasScope = true  as the last line.
-// To fit a gun: play, tap FIT in the HUD, adjust, tap COPY, then paste the copied block here in place of that gun.
 internal val GUNS = listOf(
     GunDef(
         name = "MP5",
@@ -228,7 +218,6 @@ internal val GUNS = listOf(
             "run_shoot" to GunTurn(-167f, 31f, -37f)
         )
     ),
-    // rifle.glb (sniper with scope). Size and grip fitted in gun-size-fitter.html (about 0.9 m long on the 1.8 m character).
     GunDef(
         name = "Rifle",
         file = "rifle.glb",
@@ -243,7 +232,6 @@ internal val GUNS = listOf(
         ),
         hasScope = true
     ),
-    // carbine.glb. Size and grip fitted in gun-size-fitter.html (about 0.76 m long on the 1.8 m character).
     GunDef(
         name = "Carbine",
         file = "carbine.glb",
@@ -259,7 +247,6 @@ internal val GUNS = listOf(
     )
 )
 
-// ADD NEW ARENAS HERE (index 0 = "Zero Arena" = the default).
 internal class ArenaDef(val name: String, val glb: String)
 internal val ARENA_DEFS = listOf(
     ArenaDef("Zero Arena", "arena_play.glb")
@@ -272,14 +259,14 @@ internal val CHAR_NAMES = listOf("Blue", "Red", "Aqua")
 // Plain values the game loop changes every frame (no Compose redraw needed)
 internal class GameInput {
     var x = 0f
-    var y = 0f               // floor height under him
+    var y = 0f
     var z = 0f
-    var play: PlayArena? = null   // walls + ramp, filled when arena_play.json is read
-    var match: MatchState? = null // Deathmatch / Team Deathmatch / Capture the Flag (null = no match, only you)
+    var play: PlayArena? = null
+    var match: MatchState? = null
     var camPitch = 0f
-    var camYaw = 0f          // degrees, 0 = looking toward -Z
+    var camYaw = 0f
     var faceDeg = 0f
-    var joyX = 0f            // move stick
+    var joyX = 0f
     var joyY = 0f
     var shooting = false
     var aimHeld = false
@@ -287,29 +274,29 @@ internal class GameInput {
     var aimY = 0f
     var paused = false
     var crouch = false
-    var shieldOn by mutableStateOf(false)   // shield bubble is up (HUD shield button). The HUD reads it too.
-    var shieldHp = SHIELD_MAX_HITS          // hits left
-    var shieldCd = 0f                       // seconds until a broken shield comes back (0 = not broken)
-    var shieldCdSec by mutableIntStateOf(0) // same, whole seconds, for the HUD number
+    var shieldOn by mutableStateOf(false)
+    var shieldHp = SHIELD_MAX_HITS
+    var shieldCd = 0f
+    var shieldCdSec by mutableIntStateOf(0)
     var shieldBreakT = 0f
     var shieldAppearT = 0f
     var shieldWasOn = false
-    var scopeOn = false       // scoped in (HUD scope button, only for guns with hasScope)
+    var scopeOn = false
     var handMode = false
-    var gunWanted by mutableIntStateOf(0)   // which gun the HUD wants in the hand (index in GUNS)
+    var gunWanted by mutableIntStateOf(0)
     var zoom = 1f
     var active = 0
     var lastNanos = 0L
     var gunOwner = -1
     var gunLoaded = false
     var gunDef: GunDef = GUNS[0]
-    var gunChild: Node? = null    // the gun model inside the gun holder (its position = the grip numbers)
+    var gunChild: Node? = null
     val attachFails = IntArray(3)
     var fireTimer = 0f
     var mx = 0f
     var my = 0f
     var mz = 0f
-    var flashT = 0f           // muzzle flash timer
+    var flashT = 0f
     val hand = FloatArray(3)
     val bAlive = BooleanArray(BULLET_COUNT)
     val bx = FloatArray(BULLET_COUNT)
@@ -318,7 +305,6 @@ internal class GameInput {
     val bdx = FloatArray(BULLET_COUNT)
     val bdz = FloatArray(BULLET_COUNT)
     val bDist = FloatArray(BULLET_COUNT)
-    // hit effect particles (sparks 0..23, blood 24..87)
     val fxLife = FloatArray(FX_COUNT)
     val fxX = FloatArray(FX_COUNT)
     val fxY = FloatArray(FX_COUNT)
@@ -326,19 +312,17 @@ internal class GameInput {
     val fxVX = FloatArray(FX_COUNT)
     val fxVY = FloatArray(FX_COUNT)
     val fxVZ = FloatArray(FX_COUNT)
-    val fxSplat = BooleanArray(FX_COUNT)    // blood drop that landed and is now a flat spot on the floor
-    // shield hit (set by MatchLogic.kt when a bullet hits your shield)
-    var shieldHitT = 0f        // seconds left of the ripple (0 = no ripple)
-    var shieldDx = 0f          // direction from the shield centre to the hit spot (length 1)
+    val fxSplat = BooleanArray(FX_COUNT)
+    var shieldHitT = 0f
+    var shieldDx = 0f
     var shieldDy = 0f
     var shieldDz = 1f
-    // punch combo + jump
     val combo = PunchCombo()
     var punchClip = ""
     var punchT = 0f
     var punchTap = false
     var jumpTap = false
-    var jumpState = 0         // 0 on the ground, 1 crouching before takeoff, 2 in the air, 3 landing
+    var jumpState = 0
     var jumpClock = 0f
     var airClock = 0f
     var jumpClipT = 0f
@@ -351,16 +335,16 @@ internal class GameInput {
     var runMode = false
 
     // ---- Gun fit mode (HUD "FIT" panel) ----
-    var fitOn = false                 // true = the gun uses the fit numbers below
-    var fitSel = 0                    // which pose is shown/edited: 0 carry, 1 shoot, 2 walk_shoot, 3 run_shoot
-    var fitGunName = ""               // the gun the fit numbers belong to (they reload when the gun changes)
-    var fitGx = 0f                    // grip x / y / z
+    var fitOn = false
+    var fitSel = 0
+    var fitGunName = ""
+    var fitGx = 0f
     var fitGy = 0f
     var fitGz = 0f
     var fitScale = 0.24f
-    val fitRot = HashMap<String, FloatArray>()   // pose name -> turn x, y, z (degrees)
-    var fitTick by mutableIntStateOf(0)          // goes up whenever a fit number changes (so the HUD redraws)
-    var fitPose by mutableStateOf("carry")       // the pose being edited right now (shown in the HUD)
+    val fitRot = HashMap<String, FloatArray>()
+    var fitTick by mutableIntStateOf(0)
+    var fitPose by mutableStateOf("carry")
 
     fun fitKey(): String = when (fitSel) {
         1 -> "shoot"
@@ -370,7 +354,6 @@ internal class GameInput {
     }
 }
 
-// Where one character is in its animations (used for the blend)
 internal class AnimState {
     var cur = -1
     var prev = -1
@@ -382,7 +365,6 @@ internal class AnimState {
     var prevClamp = false
 }
 
-// Everything that is drawn for ONE bot: the character copy, its gun, the marker over the head and the health bar
 internal class BotView(
     val model: ModelNode,
     val gun: Node,
@@ -397,15 +379,13 @@ internal class BotView(
 }
 
 // ---------------- Shield shape: Goldberg sphere (hexagon cells + 12 pentagons) ----------------
-// Built from a subdivided icosahedron: the middle of every triangle is a corner, and every pair of
-// neighbouring triangles is joined by one line. SHIELD_FREQ = how fine the mesh is.
 private class ShieldGeo(
     val count: Int,
-    val mid: FloatArray,     // line centre (x,y,z) for each line, already scaled to SHIELD_R
-    val dir: FloatArray,     // unit direction from the shield centre to each line
+    val mid: FloatArray,
+    val dir: FloatArray,
     val quat: Array<Quaternion>,
-    val lens: FloatArray,    // length of each line
-    val band: IntArray       // colour band 0..4 (bottom to top)
+    val lens: FloatArray,
+    val band: IntArray
 )
 
 private val SHIELD_GEO: ShieldGeo by lazy { buildShieldGeo() }
@@ -448,14 +428,12 @@ private fun buildShieldGeo(): ShieldGeo {
             if (j < n - i - 1) tris.add(intArrayOf(p(i + 1, j), p(i + 1, j + 1), p(i, j + 1)))
         }
     }
-    // centre of every triangle = one corner of the hexagon mesh
     val cen = tris.map { t ->
         val a = verts[t[0]]; val b = verts[t[1]]; val c = verts[t[2]]
         val x = a[0] + b[0] + c[0]; val y = a[1] + b[1] + c[1]; val z = a[2] + b[2] + c[2]
         val l = sqrt(x * x + y * y + z * z)
         floatArrayOf(x / l, y / l, z / l)
     }
-    // triangles that share an edge -> one line between their centres
     val edgeFaces = HashMap<Long, IntArray>()
     for ((fi, t) in tris.withIndex()) for (e in 0..2) {
         val a = t[e]; val b = t[(e + 1) % 3]
@@ -474,20 +452,21 @@ private fun buildShieldGeo(): ShieldGeo {
         val ml = sqrt(mx * mx + my * my + mz * mz)
         mids.add(mx * SHIELD_R); mids.add(my * SHIELD_R); mids.add(mz * SHIELD_R)
         dirs.add(mx / ml); dirs.add(my / ml); dirs.add(mz / ml)
-        lens.add(d * SHIELD_R * 1.1f)                     // a little longer so the corners join with no gap
+        lens.add(d * SHIELD_R * 1.1f)
         quats.add(quatFromZ(dx / d, dy / d, dz / d))
         bands.add((((my / ml) + 1f) / 2f * 5f).toInt().coerceIn(0, 4))
     }
     return ShieldGeo(quats.size, mids.toFloatArray(), dirs.toFloatArray(), quats.toTypedArray(), lens.toFloatArray(), bands.toIntArray())
 }
 
-// Colours + which colour each line has right now (the colour only changes when it has to)
+// Colours + which colour each line has right now
 private object ShieldFx {
     var mats: List<MaterialInstance> = emptyList()
     var cur = IntArray(0)
+    var fillMats: List<MaterialInstance> = emptyList()   // 0 = blue body, 1 = hit flash, 2 = amber (weak)
+    var fillCur = -1
 }
 
-// Turns the Z axis (0,0,1) toward the unit direction (dx, dy, dz)
 private fun quatFromZ(dx: Float, dy: Float, dz: Float): Quaternion {
     if (dz > 0.9999f) return Quaternion(0f, 0f, 0f, 1f)
     if (dz < -0.9999f) return Quaternion(1f, 0f, 0f, 0f)
@@ -498,7 +477,6 @@ private fun quatFromZ(dx: Float, dy: Float, dz: Float): Quaternion {
     return Quaternion(x / n, y / n, 0f, w / n)
 }
 
-// Names for the pick screens in Game3DHub (so the lists live in one place)
 internal fun characterNames(): List<String> = CHAR_NAMES
 internal fun gunNames(): List<String> = GUNS.map { it.name }
 
@@ -536,7 +514,6 @@ internal fun Game3DView(
     val gun = remember { Node(engine).apply { isVisible = false } }
     var gunModel by remember { mutableStateOf<ModelNode?>(null) }
 
-    // Your bullets: long glowing tracers (hot orange-yellow)
     val bullets = remember {
         val bulletMat = materialLoader.createColorInstance(Color(0xFFFFB02E))
         List(BULLET_COUNT) {
@@ -545,7 +522,6 @@ internal fun Game3DView(
         }
     }
 
-    // Bot bullets (red-orange, so you can tell them from yours)
     val botBullets = remember {
         val mat = materialLoader.createColorInstance(Color(0xFFFF4A2C))
         List(BOT_BULLET_COUNT) {
@@ -554,13 +530,11 @@ internal fun Game3DView(
         }
     }
 
-    // Muzzle flash at the gun
     val muzzleFlash = remember {
         val mat = materialLoader.createColorInstance(Color(0xFFFFD35A))
         CubeNode(engine, size = Float3(0.16f, 0.16f, 0.16f), materialInstance = mat).apply { isVisible = false }
     }
 
-    // Hit effects: 24 sparks (wall / shield hits) + 64 blood drops (fighter hits). Blood = small, dark red, two shades.
     val fxNodes = remember {
         val spark = materialLoader.createColorInstance(Color(0xFFFFC040))
         val bloodDark = materialLoader.createColorInstance(Color(0xFF7A0C12))
@@ -571,49 +545,42 @@ internal fun Game3DView(
         }.also { l -> l.forEach { it.isVisible = false } }
     }
 
-    // Capture the Flag. 12 nodes for each team (see FLAG_NODES_PER_TEAM). Team 0 (your flag) is orange, team 1 (enemy) is cyan.
-    // Hidden unless the mode is Capture the Flag.
+    // Capture the Flag. Team 0 (your flag) is orange, team 1 (enemy) is cyan. Hidden unless the mode is Capture the Flag.
     val flagNodes = remember {
-        val steel = materialLoader.createColorInstance(Color(0xFF3A3F45))       // pole
-        val gunmetal = materialLoader.createColorInstance(Color(0xFF23272B))    // pedestal
+        val steel = materialLoader.createColorInstance(Color(0xFF3A3F45))
+        val gunmetal = materialLoader.createColorInstance(Color(0xFF23272B))
         val orange = materialLoader.createColorInstance(Color(0xFFFF8A00))
-        val orangeShade = materialLoader.createColorInstance(Color(0xFFE67A00))
-        val orangeDark = materialLoader.createColorInstance(Color(0xFF8A4300))
+        val orangeShade = materialLoader.createColorInstance(Color(0xFFD96F00))
         val cyan = materialLoader.createColorInstance(Color(0xFF35D3FF))
-        val cyanShade = materialLoader.createColorInstance(Color(0xFF2BB8E0))
-        val cyanDark = materialLoader.createColorInstance(Color(0xFF14677F))
+        val cyanShade = materialLoader.createColorInstance(Color(0xFF1FA6D1))
         val list = ArrayList<CubeNode>()
         for (team in 0..1) {
             val main = if (team == 0) orange else cyan
             val shade = if (team == 0) orangeShade else cyanShade
-            val dark = if (team == 0) orangeDark else cyanDark
             list.add(CubeNode(engine, size = Float3(0.05f, 2.3f, 0.05f), materialInstance = steel))          // pole
             list.add(CubeNode(engine, size = Float3(0.1f, 0.1f, 0.1f), materialInstance = main))            // finial
-            for (s in 0 until FLAG_STRIPS) {                                                                 // banner strips: a pennant that gets shorter to the tip
-                val u = s / (FLAG_STRIPS - 1f)
-                val h = 0.58f - 0.30f * u
-                val m = if (s < 2) dark else if (s % 2 == 0) main else shade
-                list.add(CubeNode(engine, size = Float3(FLAG_STRIP_W * 1.2f, h, 0.02f), materialInstance = m))
+            for (s in 0 until FLAG_STRIPS) {                                                                 // cloth: thin strips, soft fold shading
+                val m = if ((s / 4) % 2 == 0) main else shade
+                list.add(CubeNode(engine, size = Float3(FLAG_STRIP_W * 1.7f, FLAG_H, 0.012f), materialInstance = m))
             }
             list.add(CubeNode(engine, size = Float3(2.1f, 0.12f, 2.1f), materialInstance = gunmetal))        // pedestal
-            list.add(CubeNode(engine, size = Float3(3.0f, 0.04f, 0.06f), materialInstance = main))           // frame (+z)
-            list.add(CubeNode(engine, size = Float3(3.0f, 0.04f, 0.06f), materialInstance = main))           // frame (-z)
-            list.add(CubeNode(engine, size = Float3(0.06f, 0.04f, 3.0f), materialInstance = main))           // frame (+x)
-            list.add(CubeNode(engine, size = Float3(0.06f, 0.04f, 3.0f), materialInstance = main))           // frame (-x)
-            list.add(CubeNode(engine, size = Float3(0.03f, 12f, 0.03f), materialInstance = main))            // beam (seen from far)
+            list.add(CubeNode(engine, size = Float3(3.0f, 0.04f, 0.06f), materialInstance = main))
+            list.add(CubeNode(engine, size = Float3(3.0f, 0.04f, 0.06f), materialInstance = main))
+            list.add(CubeNode(engine, size = Float3(0.06f, 0.04f, 3.0f), materialInstance = main))
+            list.add(CubeNode(engine, size = Float3(0.06f, 0.04f, 3.0f), materialInstance = main))
+            list.add(CubeNode(engine, size = Float3(0.03f, 12f, 0.03f), materialInstance = main))            // beam
         }
         list.forEach { it.isVisible = false }
         list.toList()
     }
 
-    // The bots that are drawn (filled after the arena and your character are loaded)
     val botViews = remember { mutableListOf<BotView>() }
 
-    // Shield: glass honeycomb bubble (hidden until the shield button is on). Each bar is turned once, here.
+    // Shield hex lines (thick, glowing)
     val shieldNodes = remember {
         val geo = SHIELD_GEO
         // 0..4 = blue -> aqua gradient (bottom to top), 5 = shine, 6 = hit glow, 7 = amber (shield is weak)
-        val colours = listOf(0xFF1E6BFFL, 0xFF1F9DFFL, 0xFF2BC4FFL, 0xFF5FE0FFL, 0xFF9FF2FFL, 0xFFD9FBFFL, 0xFFFFFFFFL, 0xFFFFB347L)
+        val colours = listOf(0xFF2A7BFFL, 0xFF2FB0FFL, 0xFF3FD2FFL, 0xFF7FE8FFL, 0xFFB8F6FFL, 0xFFE8FDFFL, 0xFFFFFFFFL, 0xFFFFB347L)
         val mats = colours.map { materialLoader.createColorInstance(Color(it)) }
         ShieldFx.mats = mats
         ShieldFx.cur = IntArray(geo.count) { geo.band[it] }
@@ -626,7 +593,23 @@ internal fun Game3DView(
         }
     }
 
-    // Shield hit ripple: a ring of bright spots that spreads out from the hit spot + one flash at the hit spot
+    // Shield body: 0 = translucent blue ball, 1 = soft outer glow ball, 2 = glowing floor disc
+    // If the ball looks solid (not see-through) in your SceneView version, lower the alpha values below.
+    val shieldFill = remember {
+        val body = materialLoader.createColorInstance(Color(0xFF1E78FF).copy(alpha = 0.30f))
+        val flash = materialLoader.createColorInstance(Color(0xFF9FF2FF).copy(alpha = 0.55f))
+        val amber = materialLoader.createColorInstance(Color(0xFFFFA030).copy(alpha = 0.32f))
+        val glow = materialLoader.createColorInstance(Color(0xFF4FD8FF).copy(alpha = 0.14f))
+        val disc = materialLoader.createColorInstance(Color(0xFF35C8FF).copy(alpha = 0.40f))
+        ShieldFx.fillMats = listOf(body, flash, amber)
+        ShieldFx.fillCur = 0
+        listOf<Node>(
+            SphereNode(engine, radius = 1f, materialInstance = body).apply { isVisible = false },
+            SphereNode(engine, radius = 1f, materialInstance = glow).apply { isVisible = false },
+            CylinderNode(engine, radius = SHIELD_R, height = 0.02f, materialInstance = disc).apply { isVisible = false }
+        )
+    }
+
     val rippleNodes = remember {
         val mat = materialLoader.createColorInstance(Color(0xFFEFFFFF))
         List(RIPPLE_COUNT) {
@@ -638,6 +621,7 @@ internal fun Game3DView(
         add(gun)
         addAll(bullets)
         addAll(botBullets)
+        addAll(shieldFill)
         addAll(shieldNodes)
         addAll(rippleNodes)
         add(muzzleFlash)
@@ -645,7 +629,7 @@ internal fun Game3DView(
         addAll(flagNodes)
     }
 
-    // 1) arena, 2) character. One step at a time so nothing freezes.
+    // 1) arena, 2) character
     LaunchedEffect(Unit) {
         try {
             withFrameNanos { }
@@ -653,7 +637,7 @@ internal fun Game3DView(
             rig.play = p
             rig.x = p.blueX
             rig.z = p.blueZ
-            rig.camYaw = if (p.blueX < 0f) 90f else -90f   // face the middle of the arena
+            rig.camYaw = if (p.blueX < 0f) 90f else -90f
             status = "Loading arena model..."
             withFrameNanos { }
             nodes.add(
@@ -668,7 +652,7 @@ internal fun Game3DView(
                 modelInstance = modelLoader.createModelInstance(CHAR_FILES[ci]),
                 autoAnimate = false,
                 scaleToUnits = CHAR_HEIGHT,
-                centerOrigin = Position(0f, -1f, 0f)   // feet on the ground
+                centerOrigin = Position(0f, -1f, 0f)
             )
             m.isVisible = false
             models[ci] = m
@@ -681,7 +665,7 @@ internal fun Game3DView(
         }
     }
 
-    // 3) the gun in the hand. Runs again whenever the HUD changes gunWanted.
+    // 3) the gun in the hand
     LaunchedEffect(ready, rig.gunWanted) {
         if (!ready) return@LaunchedEffect
         val i = rig.gunWanted.coerceIn(0, GUNS.lastIndex)
@@ -709,7 +693,7 @@ internal fun Game3DView(
         }
     }
 
-    // 4) the bots (Deathmatch / Team Deathmatch / Capture the Flag). Each bot = one more copy of char_blue.glb + a gun.
+    // 4) the bots
     LaunchedEffect(ready) {
         if (!ready) return@LaunchedEffect
         val mt = rig.match ?: return@LaunchedEffect
@@ -719,11 +703,11 @@ internal fun Game3DView(
             val allyMat = materialLoader.createColorInstance(Color(0xFF35E07A))
             val hpMat = materialLoader.createColorInstance(Color(0xFFF4F6FA))
             for (b in mt.bots) {
-                val gi = (0..GUNS.lastIndex).random()      // any of the guns
+                val gi = (0..GUNS.lastIndex).random()
                 val gdef = GUNS[gi]
                 withFrameNanos { }
                 val m = ModelNode(
-                    modelInstance = modelLoader.createModelInstance(CHAR_FILES[0]),   // always the blue one
+                    modelInstance = modelLoader.createModelInstance(CHAR_FILES[0]),
                     autoAnimate = false,
                     scaleToUnits = CHAR_HEIGHT,
                     centerOrigin = Position(0f, -1f, 0f)
@@ -775,11 +759,10 @@ internal fun Game3DView(
             childNodes = nodes,
             environment = environment,
             onFrame = { nanos ->
-                stepGame(nanos, rig, models, cameraNode, engine, gun, bullets, shieldNodes, rippleNodes, botViews, botBullets, muzzleFlash, fxNodes, flagNodes)
+                stepGame(nanos, rig, models, cameraNode, engine, gun, bullets, shieldNodes, shieldFill, rippleNodes, botViews, botBullets, muzzleFlash, fxNodes, flagNodes)
             }
         )
 
-        // Whole-screen touch layer UNDER the HUD buttons: one finger drag = turn camera, two fingers = zoom/twist
         Box(
             Modifier
                 .fillMaxSize()
@@ -811,7 +794,7 @@ internal fun Game3DView(
                                 lastSpread = 0f
                                 lastAngle = Float.NaN
                                 val c = pressed[0]
-                                val sens = if (rig.scopeOn) SCOPE_DRAG else 1f     // steadier while scoped
+                                val sens = if (rig.scopeOn) SCOPE_DRAG else 1f
                                 rig.camYaw += (c.position.x - c.previousPosition.x) * CAM_DRAG_SPEED * sens
                                 rig.camPitch = (rig.camPitch + (c.position.y - c.previousPosition.y) * CAM_PITCH_SPEED * sens)
                                     .coerceIn(0f, CAM_PITCH_MAX)
@@ -830,7 +813,6 @@ internal fun Game3DView(
     }
 }
 
-// The animation name the gun fit mode forces for each pose tab
 private fun fitWantOf(sel: Int): String = when (sel) {
     1 -> "shoot"
     2 -> "walk_shoot"
@@ -838,7 +820,6 @@ private fun fitWantOf(sel: Int): String = when (sel) {
     else -> "idle"
 }
 
-// Copies the numbers of the gun in the hand into the fit values, once per gun (so the panel starts from the real numbers)
 private fun syncFit(rig: GameInput, def: GunDef) {
     if (rig.fitGunName == def.name) return
     rig.fitGunName = def.name
@@ -863,6 +844,7 @@ private fun stepGame(
     gun: Node,
     bullets: List<CubeNode>,
     shieldNodes: List<CubeNode>,
+    shieldFill: List<Node>,
     rippleNodes: List<CubeNode>,
     botViews: List<BotView>,
     botBullets: List<CubeNode>,
@@ -870,15 +852,12 @@ private fun stepGame(
     fxNodes: List<CubeNode>,
     flagNodes: List<CubeNode>
 ) {
-    // Paused: freeze everything (the camera stays where it is)
     if (rig.paused) { rig.lastNanos = nanos; return }
-    // fists mode: no aiming, no shooting
     if (rig.handMode) { rig.shooting = false; rig.aimHeld = false; rig.scopeOn = false }
 
     val dt = if (rig.lastNanos == 0L) 0f else ((nanos - rig.lastNanos) / 1_000_000_000f).coerceIn(0f, 0.05f)
     rig.lastNanos = nanos
 
-    // Eliminated: the controls do nothing until he respawns
     val mt = rig.match
     val dead = mt?.playerDead == true
     if (dead) {
@@ -894,7 +873,7 @@ private fun stepGame(
         rig.scopeOn = false
     }
 
-    // ---- Jump: crouch -> up and down with real height -> landing ----
+    // ---- Jump ----
     if (rig.jumpTap) {
         rig.jumpTap = false
         if (rig.jumpState == 0 && rig.punchClip != "punch_3") {
@@ -945,9 +924,9 @@ private fun stepGame(
     }
 
     val yawR = rig.camYaw * DEG_TO_RAD
-    val fx = sin(yawR)          // camera forward
+    val fx = sin(yawR)
     val fz = -cos(yawR)
-    val rx = cos(yawR)          // camera right
+    val rx = cos(yawR)
     val rz = sin(yawR)
 
     val mag = min(1f, hypot(rig.joyX, rig.joyY))
@@ -1013,7 +992,7 @@ private fun stepGame(
     val base = if (rig.speed < 0.15f) "idle" else if (rig.speed > (WALK_SPEED + RUN_SPEED) / 2f) "run" else "walk"
     val shootWant = if (rig.shooting) (if (base == "idle") "shoot" else base + "_shoot") else base
     val want = when {
-        rig.fitOn -> fitWantOf(rig.fitSel)           // gun fit mode: the pose picked in the panel
+        rig.fitOn -> fitWantOf(rig.fitSel)
         rig.jumpState != 0 -> JUMP_CLIP
         rig.punchClip.isNotEmpty() -> rig.punchClip
         rig.crouch -> JUMP_CLIP
@@ -1025,7 +1004,6 @@ private fun stepGame(
     val moveDot = sx * rig.moveX + sz * rig.moveZ
     val timeScale = if (rig.speed > 0.15f && moveDot < BACKPEDAL_DOT) -1f else 1f
 
-    // When scoped the camera sits at his shoulder, so his body is hidden (you look through the scope)
     for (i in models.indices) {
         val m = models[i] ?: continue
         val on = i == rig.active
@@ -1048,7 +1026,6 @@ private fun stepGame(
     val def = rig.gunDef
     syncFit(rig, def)
     if (rig.fitOn) {
-        // gun fit mode: numbers from the HUD panel (grip, scale, and the turn of the pose being edited)
         val key = rig.fitKey()
         if (rig.fitPose != key) rig.fitPose = key
         val r = rig.fitRot[key] ?: floatArrayOf(0f, 0f, 0f)
@@ -1086,7 +1063,6 @@ private fun stepGame(
     }
     updateBullets(dt, rig, bullets, bdirX, bdirZ)
 
-    // Muzzle flash: a small bright burst at the gun for a few frames after each shot
     if (rig.flashT > 0f && !dead) {
         rig.flashT -= dt
         val s = 0.8f + Random.nextFloat() * 0.8f
@@ -1098,27 +1074,23 @@ private fun stepGame(
         muzzleFlash.isVisible = false
     }
 
-    // Deathmatch / Team Deathmatch / Capture the Flag: bots think, shoot, die, respawn. Then they are drawn.
     if (mt != null) {
         mt.update(dt, rig)
         stepBots(dt, rig, mt, botViews, botBullets, engine)
-        // hit spots collected by the match logic -> sparks (wall / shield) or blood (fighter)
         for (h in mt.hitFx) {
-            if (h[3] <= 0.5f && rig.shieldOn) {      // a spark on the shield: the shield shows the hit itself (liquid ripple), no square sparks
+            if (h[3] <= 0.5f && rig.shieldOn) {
                 val ddx = h[0] - rig.x; val ddy = h[1] - (rig.y + rig.jumpH + SHIELD_CY); val ddz = h[2] - rig.z
                 if (ddx * ddx + ddy * ddy + ddz * ddz < (SHIELD_R + 0.4f) * (SHIELD_R + 0.4f)) continue
             }
             spawnBurst(rig, h[0], h[1], h[2], h[3].toInt(), if (h[3] > 0.5f) BLOOD_PIECES else SPARK_PIECES)
         }
         mt.hitFx.clear()
-        if (mt.over) rig.paused = true      // match finished: freeze the game, the HUD shows the result
+        if (mt.over) rig.paused = true
     }
-    // the shield is drawn after the match update, so a hit from this frame shows at once
-    updateShield(rig, shieldNodes, rippleNodes, nanos, dt)
+    updateShield(rig, shieldNodes, shieldFill, rippleNodes, nanos, dt)
     updateFx(dt, rig, fxNodes)
     updateFlags(mt, flagNodes, nanos)
 
-    // Follow camera. Normal: behind him (distance = pinch zoom). Scoped: at his shoulder.
     val dist = if (rig.scopeOn) SCOPE_DIST else CAM_DIST * rig.zoom
     val pr = rig.camPitch * DEG_TO_RAD
     val back = dist * cos(pr)
@@ -1129,14 +1101,13 @@ private fun stepGame(
 
 // ---------------- Capture the Flag: draw the two flags ----------------
 
-// nodes = 18 per team (team 0 first): 0 pole | 1 finial | 2..11 banner strips | 12 pedestal | 13..16 base frame | 17 beam.
-// Positions come from MatchState. The pedestal and the frame always stay at the base. The rest follows the flag.
 private fun updateFlags(mt: MatchState?, nodes: List<CubeNode>, nanos: Long) {
     if (mt == null || !mt.ctf) {
         for (n in nodes) if (n.isVisible) n.isVisible = false
         return
     }
     val t = nanos / 1_000_000_000f
+    val clothW = FLAG_STRIPS * FLAG_STRIP_W
     for (team in 0..1) {
         val o = team * FLAG_NODES_PER_TEAM
         val x = mt.flagX[team]
@@ -1145,38 +1116,38 @@ private fun updateFlags(mt: MatchState?, nodes: List<CubeNode>, nanos: Long) {
         val hx = mt.homeX[team]
         val hy = mt.homeY[team]
         val hz = mt.homeZ[team]
-        val s = if (mt.flagState[team] == F_CARRIED) 0.65f else 1f      // smaller on somebody's back
+        val s = if (mt.flagState[team] == F_CARRIED) 0.65f else 1f
 
-        // pole + finial
         nodes[o].position = Position(x, y + 1.15f * s, z)
         nodes[o].scale = Float3(s, s, s)
         nodes[o + 1].position = Position(x, y + 2.35f * s, z)
         nodes[o + 1].scale = Float3(s, s, s)
 
-        // banner: one wave runs along the cloth from the pole to the tip. The tip moves most.
+        // cloth: a travelling wave from the pole to the free edge. Each strip leans along the slope of the wave,
+        // and the strips overlap, so it looks like one continuous piece of cloth.
+        val waveLen = 4.2f
         for (i in 0 until FLAG_STRIPS) {
             val node = nodes[o + FL_STRIP + i]
-            val u = i / (FLAG_STRIPS - 1f)                     // 0 at the pole, 1 at the tip
-            val phase = t * 3.4f - u * 3.6f + team * 1.7f
-            val amp = (0.015f + 0.17f * u) * s                 // sideways swing
-            val h = 0.58f - 0.30f * u                          // same height as when it was made
+            val u = i / (FLAG_STRIPS - 1f)
+            val phase = t * 3.6f - u * waveLen + team * 1.7f
+            val amp = (0.012f + 0.14f * u) * s
+            val slope = amp * cos(phase) * (-waveLen) / (clothW * s)       // dz / dx of the wave
+            val yaw = -atan(slope) * RAD_TO_DEG
             node.position = Position(
-                x + (0.06f + i * FLAG_STRIP_W + FLAG_STRIP_W / 2f) * s,
-                y + (2.2f - h / 2f + sin(phase * 1.3f) * 0.012f * u) * s,
+                x + (0.04f + i * FLAG_STRIP_W + FLAG_STRIP_W / 2f) * s,
+                y + (2.2f - FLAG_H / 2f + sin(phase * 1.2f) * 0.015f * u) * s,
                 z + sin(phase) * amp
             )
-            node.rotation = Rotation(y = cos(phase) * (8f + 20f * u))   // each strip leans along the wave, so the cloth bends smoothly
+            node.rotation = Rotation(y = yaw)
             node.scale = Float3(s, s, s)
         }
 
-        // base: dark pedestal + glowing frame (this square is the capture zone)
         nodes[o + FL_PED].position = Position(hx, hy + 0.06f, hz)
         nodes[o + FL_FRAME].position = Position(hx, hy + 0.14f, hz + 1.5f)
         nodes[o + FL_FRAME + 1].position = Position(hx, hy + 0.14f, hz - 1.5f)
         nodes[o + FL_FRAME + 2].position = Position(hx + 1.5f, hy + 0.14f, hz)
         nodes[o + FL_FRAME + 3].position = Position(hx - 1.5f, hy + 0.14f, hz)
 
-        // thin light beam on the flag, so you can find it from far
         nodes[o + FL_BEAM].position = Position(x, y + 6f, z)
 
         if (!nodes[o].isVisible) {
@@ -1195,7 +1166,7 @@ private fun stepBots(
     botBullets: List<CubeNode>,
     engine: Engine
 ) {
-    val barYaw = -rig.camYaw                     // health bar turned to face the camera
+    val barYaw = -rig.camYaw
     for (i in views.indices) {
         if (i >= mt.bots.size) break
         val b = mt.bots[i]
@@ -1304,14 +1275,12 @@ private fun driveAnimation(
 
 // ---------------- Shield ----------------
 
-// The shield: a hexagon energy mesh. It breathes and a light band sweeps over it.
-// Hit by a bullet -> the surface rolls like liquid (rings spread from the hit spot) and the lines there glow.
-// After SHIELD_MAX_HITS hits it shatters. After SHIELD_REVIVE_SEC seconds it grows back and protects you again.
-private fun updateShield(rig: GameInput, nodes: List<CubeNode>, ripple: List<CubeNode>, nanos: Long, dt: Float) {
-    for (n in ripple) if (n.isVisible) n.isVisible = false          // the old square ripple spots are not used any more
+// Solid blue energy bubble (translucent body + outer glow + floor disc) with thick glowing hex lines on top.
+// Hit: whole body flashes, ring ripples over the lines. After SHIELD_MAX_HITS it shatters, then grows back.
+private fun updateShield(rig: GameInput, nodes: List<CubeNode>, fill: List<Node>, ripple: List<CubeNode>, nanos: Long, dt: Float) {
+    for (n in ripple) if (n.isVisible) n.isVisible = false
     val dead = rig.match?.playerDead == true
 
-    // 1) broken: count down, then it comes back by itself
     if (rig.shieldCd > 0f) {
         rig.shieldCd = max(0f, rig.shieldCd - dt)
         if (rig.shieldCd <= 0f) {
@@ -1320,14 +1289,13 @@ private fun updateShield(rig: GameInput, nodes: List<CubeNode>, ripple: List<Cub
             rig.shieldOn = true
             rig.shieldAppearT = SHIELD_APPEAR_TIME
         } else {
-            rig.shieldOn = false                                   // MatchLogic does not protect you while it is broken
+            rig.shieldOn = false
             val sec = ceil(rig.shieldCd).toInt()
             if (sec != rig.shieldCdSec) rig.shieldCdSec = sec
         }
     }
     if (rig.shieldBreakT > 0f) rig.shieldBreakT = max(0f, rig.shieldBreakT - dt)
 
-    // 2) a new bullet hit (MatchLogic sets shieldHitT = SHIELD_HIT_TIME on every hit)
     if (rig.shieldOn && rig.shieldHitT >= SHIELD_HIT_TIME - 0.001f) {
         rig.shieldHp -= 1f
         if (rig.shieldHp <= 0f) {
@@ -1341,11 +1309,12 @@ private fun updateShield(rig: GameInput, nodes: List<CubeNode>, ripple: List<Cub
     val breaking = rig.shieldBreakT > 0f
     if (dead || (!rig.shieldOn && !breaking)) {
         for (n in nodes) if (n.isVisible) n.isVisible = false
+        for (n in fill) if (n.isVisible) n.isVisible = false
         rig.shieldHitT = 0f
         rig.shieldWasOn = false
         return
     }
-    if (rig.shieldOn && !rig.shieldWasOn && rig.shieldAppearT <= 0f) rig.shieldAppearT = SHIELD_APPEAR_TIME   // switched on: grow in
+    if (rig.shieldOn && !rig.shieldWasOn && rig.shieldAppearT <= 0f) rig.shieldAppearT = SHIELD_APPEAR_TIME
     rig.shieldWasOn = rig.shieldOn
 
     val g = SHIELD_GEO
@@ -1357,45 +1326,75 @@ private fun updateShield(rig: GameInput, nodes: List<CubeNode>, ripple: List<Cub
 
     if (rig.shieldHitT > 0f) rig.shieldHitT = max(0f, rig.shieldHitT - dt)
     if (rig.shieldAppearT > 0f) rig.shieldAppearT = max(0f, rig.shieldAppearT - dt)
-    val fade = rig.shieldHitT / SHIELD_HIT_TIME               // 1 = just hit, 0 = over
+    val fade = rig.shieldHitT / SHIELD_HIT_TIME
     val hit = fade > 0f && !breaking
     val hx = rig.shieldDx
     val hy = rig.shieldDy
     val hz = rig.shieldDz
-    val front = (1f - fade) * 2.6f                            // how far the ring has rolled (angle in radians from the hit spot)
+    val front = (1f - fade) * 2.6f
     val ap = 1f - rig.shieldAppearT / SHIELD_APPEAR_TIME
     val ease = ap * ap * (3f - 2f * ap)
     val bp = if (breaking) 1f - rig.shieldBreakT / SHIELD_BREAK_TIME else 0f
-    val low = rig.shieldHp <= SHIELD_MAX_HITS * 0.3f          // weak: the light band turns amber
+    val low = rig.shieldHp <= SHIELD_MAX_HITS * 0.3f
     val scanY = ((t * (if (low) 0.8f else 0.45f)) % 2.6f) - 1.3f
     val breathe = 1f + 0.015f * sin(t * 2.2f)
 
+    // --- solid body: translucent ball, soft outer glow, floor disc ---
+    val grow = if (ease < 1f) 0.5f + 0.5f * ease else 1f
+    val bodyR = SHIELD_R * 0.97f * breathe * grow
+    val body = fill[0]
+    val glow = fill[1]
+    val disc = fill[2]
+    if (breaking) {
+        body.isVisible = false
+        glow.isVisible = false
+        disc.isVisible = false
+    } else {
+        val want = if (hit && fade > 0.55f) 1 else if (low) 2 else 0
+        if (fx.fillCur != want && fx.fillMats.size == 3) {
+            fx.fillCur = want
+            (body as? SphereNode)?.materialInstance = fx.fillMats[want]
+        }
+        body.position = Position(cx, cy, cz)
+        body.scale = Float3(bodyR, bodyR, bodyR)
+        val glowR = bodyR * (1.06f + 0.015f * sin(t * 3f))
+        glow.position = Position(cx, cy, cz)
+        glow.scale = Float3(glowR, glowR, glowR)
+        val dr = grow * (1f + 0.03f * sin(t * 2.6f))
+        disc.position = Position(cx, rig.y + 0.03f, cz)
+        disc.scale = Float3(dr, 1f, dr)
+        body.isVisible = true
+        glow.isVisible = true
+        disc.isVisible = rig.jumpH < 0.3f
+    }
+
+    // --- hex lines ---
     for (i in nodes.indices) {
         val n = nodes[i]
         val ux = g.dir[i * 3]
         val uy = g.dir[i * 3 + 1]
         val uz = g.dir[i * 3 + 2]
-        var k = breathe + 0.012f * sin(t * 1.7f + (ux * 3.1f + uy * 4.3f + uz * 2.3f) * 3f)   // slow liquid wobble
+        var k = breathe + 0.012f * sin(t * 1.7f + (ux * 3.1f + uy * 4.3f + uz * 2.3f) * 3f)
         var thick = 1f
         var m = g.band[i]
         if (abs(uy - scanY) < 0.15f) m = if (low) M_AMBER else M_SHINE
 
         if (hit) {
             val ang = acos((ux * hx + uy * hy + uz * hz).coerceIn(-1f, 1f))
-            val rel = front - ang                              // > 0 = behind the front of the wave
-            if (rel > 0f) k += 0.10f * fade * exp(-rel * 2.2f) * sin(rel * 14f)    // rings roll over the surface like water
-            if (ang < 0.45f) k -= 0.05f * fade * (1f - ang / 0.45f)               // small dent at the hit
+            val rel = front - ang
+            if (rel > 0f) k += 0.10f * fade * exp(-rel * 2.2f) * sin(rel * 14f)
+            if (ang < 0.45f) k -= 0.05f * fade * (1f - ang / 0.45f)
             val q = rel / 0.22f
             val ring = exp(-q * q)
             if (ring > 0.35f) { m = M_HOT; thick = 1f + 1.6f * ring * fade }
             else if (ring > 0.12f) { m = M_SHINE; thick = 1f + 0.6f * ring * fade }
         }
-        if (ease < 1f) {                                       // growing in
+        if (ease < 1f) {
             k *= 0.5f + 0.5f * ease
             thick *= ease
             if (ease < 0.8f) m = M_SHINE
         }
-        if (breaking) {                                        // shatter: pieces fly out and shrink
+        if (breaking) {
             k *= 1f + 1.8f * bp
             thick *= (1f - bp)
             m = M_HOT
@@ -1405,7 +1404,7 @@ private fun updateShield(rig: GameInput, nodes: List<CubeNode>, ripple: List<Cub
         n.scale = Float3(thick, thick, g.lens[i] * k)
         if (fx.cur[i] != m) {
             fx.cur[i] = m
-            n.materialInstance = fx.mats[m]     // if this line does not compile in your SceneView version, use: n.setMaterialInstanceAt(0, fx.mats[m])
+            n.materialInstance = fx.mats[m]
         }
         if (!n.isVisible) n.isVisible = true
     }
@@ -1413,7 +1412,6 @@ private fun updateShield(rig: GameInput, nodes: List<CubeNode>, ripple: List<Cub
 
 // ---------------- Bullets ----------------
 
-// fx, fz = the direction every new bullet flies in (horizontal, length 1)
 private fun updateBullets(dt: Float, rig: GameInput, bullets: List<CubeNode>, fx: Float, fz: Float) {
     if (!rig.shooting) rig.fireTimer = 0f
     rig.fireTimer -= dt
@@ -1429,7 +1427,7 @@ private fun updateBullets(dt: Float, rig: GameInput, bullets: List<CubeNode>, fx
             rig.bDist[i] = 0f
             bullets[i].rotation = Rotation(y = atan2(fx, fz) * RAD_TO_DEG)
             rig.fireTimer = FIRE_INTERVAL
-            rig.flashT = FLASH_TIME                     // muzzle flash for this shot
+            rig.flashT = FLASH_TIME
         }
     }
     val mt = rig.match
@@ -1437,15 +1435,15 @@ private fun updateBullets(dt: Float, rig: GameInput, bullets: List<CubeNode>, fx
         if (!rig.bAlive[i]) { bullets[i].isVisible = false; continue }
         var left = BULLET_SPEED * dt
         while (left > 0f && rig.bAlive[i]) {
-            val step = min(0.25f, left)          // small steps so thin walls can't be skipped
+            val step = min(0.25f, left)
             val nx = rig.bx[i] + rig.bdx[i] * step
             val nz = rig.bz[i] + rig.bdz[i] * step
             val wall = rig.play?.bulletHits(nx, rig.by[i], nz) ?: false
             if (wall || rig.bDist[i] > BULLET_RANGE) {
-                if (wall) spawnBurst(rig, rig.bx[i], rig.by[i], rig.bz[i], 0, SPARK_PIECES)   // sparks on the wall
+                if (wall) spawnBurst(rig, rig.bx[i], rig.by[i], rig.bz[i], 0, SPARK_PIECES)
                 rig.bAlive[i] = false
             } else if (mt != null && mt.bulletStep(nx, rig.by[i], nz, 0, rig)) {
-                rig.bAlive[i] = false            // hit a bot (blood is added by the match logic)
+                rig.bAlive[i] = false
             } else {
                 rig.bx[i] = nx
                 rig.bz[i] = nz
@@ -1460,7 +1458,6 @@ private fun updateBullets(dt: Float, rig: GameInput, bullets: List<CubeNode>, fx
 
 // ---------------- Hit effects ----------------
 
-// kind 0 = orange sparks (wall / shield), kind 1 = blood (fighter). n = how many pieces fly out.
 private fun spawnBurst(rig: GameInput, x: Float, y: Float, z: Float, kind: Int, n: Int) {
     val from = if (kind == 1) FX_HALF else 0
     val to = if (kind == 1) FX_COUNT else FX_HALF
@@ -1482,8 +1479,6 @@ private fun spawnBurst(rig: GameInput, x: Float, y: Float, z: Float, kind: Int, 
     }
 }
 
-// Blood drops fall and, when they touch the floor, stay there as a flat dark spot for about 2 seconds
-// (then they shrink away). Sparks just fly and fade.
 private fun updateFx(dt: Float, rig: GameInput, nodes: List<CubeNode>) {
     for (i in 0 until FX_COUNT) {
         val n = nodes[i]
@@ -1498,7 +1493,7 @@ private fun updateFx(dt: Float, rig: GameInput, nodes: List<CubeNode>) {
             continue
         }
 
-        rig.fxVY[i] -= 9f * dt                      // pieces fall
+        rig.fxVY[i] -= 9f * dt
         rig.fxX[i] += rig.fxVX[i] * dt
         rig.fxY[i] += rig.fxVY[i] * dt
         rig.fxZ[i] += rig.fxVZ[i] * dt
