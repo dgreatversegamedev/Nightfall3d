@@ -39,9 +39,14 @@ import kotlin.random.Random
 //     path finder (NavGrid, at the bottom of this file) so they can walk around the walls.
 //
 // CHANGES IN THIS VERSION
-//  1) MatchSettings.blueBots / redBots: the Match Setup screen chooses how many bots are on each team
+//  1) SHIELD NOW REALLY PROTECTS YOUR HP: while the shield is on, bullets do no damage to your HP at all
+//     (SHIELD_KEEP = 0). Before, you still took 30% of every bullet, and at least 1 HP per bullet, so the shield
+//     felt like it did nothing. The shield itself is used up by the hits (see SHIELD_MAX_HITS in Game3DView.kt),
+//     and when it breaks your HP is exposed again until it grows back.
+//     If you want a leak, set SHIELD_KEEP to 0.1 (you take 10% of the damage).
+//  2) MatchSettings.blueBots / redBots: the Match Setup screen chooses how many bots are on each team
 //     (Team Deathmatch and Capture the Flag). MAX_BOTS is now 8 in total.
-//  2) When a bullet hits you while your shield is on, the hit is sent to the shield effect (rig.shieldHitT + direction)
+//  3) When a bullet hits you while your shield is on, the hit is sent to the shield effect (rig.shieldHitT + direction)
 //     and makes sparks instead of blood.
 // =====================================================================
 
@@ -65,7 +70,7 @@ private const val PLAYER_BULLET_DMG = 20      // your bullet damage
 private const val BOT_BULLET_DMG = 9          // bot bullet damage (low, so the test is fair)
 private const val PUNCH_DMG = 40
 private const val PUNCH_RANGE = 1.4f
-private const val SHIELD_KEEP = 0.3f          // with the shield on you take only this part of the damage
+private const val SHIELD_KEEP = 0f            // with the shield on you take this part of the damage (0 = none, 0.3 = 30%)
 private const val SHIELD_CENTER_Y = 0.9f      // same as SHIELD_CY in Game3DView.kt
 private const val SHIELD_HIT_SEC = 0.7f       // same as SHIELD_HIT_TIME in Game3DView.kt
 private const val RESPAWN_SECONDS = 3f
@@ -477,9 +482,11 @@ internal class MatchState(
     // ------------------------------------------------------------------
     private fun damagePlayer(amount: Int, attacker: Int, rig: GameInput) {
         if (playerDead || over) return
-        var a = amount.toFloat()
-        if (rig.shieldOn) a *= SHIELD_KEEP
-        playerHp = (playerHp - a.roundToInt().coerceAtLeast(1)).coerceAtLeast(0)
+        // Shield on: you take SHIELD_KEEP of the damage (0 = the bullet does nothing to your HP).
+        // Shield off: you take the full damage (at least 1).
+        val taken = if (rig.shieldOn) (amount * SHIELD_KEEP).roundToInt() else amount.coerceAtLeast(1)
+        if (taken <= 0) return
+        playerHp = (playerHp - taken).coerceAtLeast(0)
         if (playerHp <= 0) {
             playerDead = true
             playerRespawnT = RESPAWN_SECONDS
