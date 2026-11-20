@@ -40,6 +40,7 @@ import com.d200.nightfall3d.game.GameMode
 import com.d200.nightfall3d.game.MatchSettings
 import com.d200.nightfall3d.game.MatchState
 import com.d200.nightfall3d.game.PLAYER_MAX_HP
+import com.d200.nightfall3d.game.ThrowLoadout
 import com.d200.nightfall3d.game.CHAR_FILES
 import com.d200.nightfall3d.game.GUNS
 import com.d200.nightfall3d.game.Game3DView
@@ -359,6 +360,8 @@ fun HudScreen(api: GameApi, onExit: () -> Unit) {
     val input = remember {
         GameInput().also {
             it.gunWanted = allGuns.indexOf(gunList[startGun]).coerceAtLeast(0)
+            it.grenades = if (ThrowLoadout.grenadeOn) ThrowLoadout.GRENADE_COUNT else 0
+            it.gasCans = if (ThrowLoadout.gasOn) ThrowLoadout.GAS_COUNT else 0
             it.match = match
         }
     }
@@ -578,8 +581,28 @@ fun HudScreen(api: GameApi, onExit: () -> Unit) {
             GlyphButton(k, atBL(k, 26f, 418f, MID), MID, Glyph.BACKPACK, 0.58f, Orange, 3f)
             GlyphButton(k, atBL(k, 26f, 530f, MID), MID, Glyph.MEDKIT, 0.58f)
             CountBadge(k, atBL(k, 84f, 576f, 28f), "5")
-            GlyphButton(k, atBL(k, 26f, 642f, MID), MID, Glyph.GRENADE, 0.58f)
-            CountBadge(k, atBL(k, 84f, 688f, 28f), "3")
+            // grenade: taken on the Weapons screen > GRENADES
+            if (ThrowLoadout.grenadeOn) {
+                GlyphButton(k, atBL(k, 26f, 642f, MID), MID, Glyph.GRENADE, 0.58f) {
+                    if (input.grenades > 0) input.throwReq = 1
+                }
+                CountBadge(k, atBL(k, 84f, 688f, 28f), "${input.grenades}")
+            }
+            // gas can (above the backpack; change 306f / 352f to move it)
+            if (ThrowLoadout.gasOn) {
+                Box(
+                    atBL(k, 26f, 306f, MID)
+                        .sized(k, MID, MID)
+                        .clip(CircleShape)
+                        .background(GlassSoft)
+                        .border((2 * k).dp, Color(0xFF8BE03A), CircleShape)
+                        .clickable { if (input.gasCans > 0) input.throwReq = 2 },
+                    contentAlignment = Alignment.Center
+                ) {
+                    NfText("GAS", size = fsz(k, 26f), bold = true, color = Color(0xFF8BE03A))
+                }
+                CountBadge(k, atBL(k, 84f, 352f, 28f), "${input.gasCans}")
+            }
 
             // walk stick -> the character moves
             Stick(k, 220f, false, atBL(k, 175f, 555f, 220f)) { x, y ->
