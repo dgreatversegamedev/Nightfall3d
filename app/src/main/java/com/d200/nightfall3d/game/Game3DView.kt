@@ -95,8 +95,14 @@ private const val ACCEL = 9f
 private const val BLEND_TIME = 0.25f
 private const val BLEND_FLIP = false
 private const val RUN_SPEED = 4.6f
-private const val CAM_DIST = 3.2f
-private const val CAM_HEIGHT = 1.5f
+// FIXED FAR-WIDE VIEW (like the reference screenshot): the whole body is seen, the horizon is in the upper third.
+// LOCK_VIEW = true  -> no pinch zoom and no up/down camera drag (left/right drag still turns the camera).
+// LOCK_VIEW = false -> the old free zoom + pitch come back.
+// If the view is too far / too close, only change CAM_DIST (bigger = farther) and CAM_HEIGHT (bigger = looks more from above).
+private const val LOCK_VIEW = true
+private const val CAM_DIST = 5.6f
+private const val CAM_HEIGHT = 2.3f
+private const val CAM_HEIGHT_SCOPE = 1.5f     // the sniper scope keeps its old low camera
 private const val CAM_LOOK_AHEAD = 6f
 private const val CAM_LOOK_Y = 1.0f
 private const val ZOOM_MIN = 0.4f
@@ -245,8 +251,10 @@ internal val ARENA_DEFS = listOf(
 )
 internal fun arenaNames(): List<String> = ARENA_DEFS.map { it.name }
 
-internal val CHAR_FILES = listOf("char_blue.glb", "char_red.glb", "char_aqua.glb")
-internal val CHAR_NAMES = listOf("Blue", "Red", "Aqua")
+// Orange = orange_amor.glb (the character with armour). orange_helmet.glb is NOT here on purpose:
+// the helmet is only for the character screen later, not for the game.
+internal val CHAR_FILES = listOf("char_blue.glb", "char_red.glb", "char_aqua.glb", "orange_amor.glb")
+internal val CHAR_NAMES = listOf("Blue", "Red", "Aqua", "Orange")
 
 // Plain values the game loop changes every frame (no Compose redraw needed)
 internal class GameInput {
@@ -289,7 +297,7 @@ internal class GameInput {
     var gunLoaded = false
     var gunDef: GunDef = GUNS[0]
     var gunChild: Node? = null
-    val attachFails = IntArray(3)
+    val attachFails = IntArray(CHAR_FILES.size)
     var fireTimer = 0f
     var cooldown = 0f                  // seconds until the gun can shoot again (WeaponSpec.shotIntervalSeconds)
     val bPool = arrayOfNulls<FxPool>(BULLET_COUNT)       // which GLB pool each flying bullet's model came from
@@ -330,7 +338,7 @@ internal class GameInput {
     var jumpClipT = 0f
     var jumpH = 0f
     var jumpV = 0f
-    val anim = Array(3) { AnimState() }
+    val anim = Array(CHAR_FILES.size) { AnimState() }
     var speed = 0f
     var moveX = 0f
     var moveZ = 0f
@@ -702,7 +710,7 @@ internal fun Game3DView(
                             if (pressed.size >= 2) {
                                 val spread = (pressed[0].position - pressed[1].position).getDistance()
                                 if (lastSpread > 0f && spread > 0f) {
-                                    rig.zoom = (rig.zoom * lastSpread / spread).coerceIn(ZOOM_MIN, ZOOM_MAX)
+                                    if (!LOCK_VIEW) rig.zoom = (rig.zoom * lastSpread / spread).coerceIn(ZOOM_MIN, ZOOM_MAX)
                                 }
                                 lastSpread = spread
                                 val v = pressed[1].position - pressed[0].position
@@ -720,7 +728,7 @@ internal fun Game3DView(
                                 val c = pressed[0]
                                 val sens = if (rig.scopeOn) SCOPE_DRAG else 1f
                                 rig.camYaw += (c.position.x - c.previousPosition.x) * CAM_DRAG_SPEED * sens
-                                rig.camPitch = (rig.camPitch + (c.position.y - c.previousPosition.y) * CAM_PITCH_SPEED * sens)
+                                if (!LOCK_VIEW) rig.camPitch = (rig.camPitch + (c.position.y - c.previousPosition.y) * CAM_PITCH_SPEED * sens)
                                     .coerceIn(0f, CAM_PITCH_MAX)
                             }
                             event.changes.forEach { it.consume() }
@@ -1027,11 +1035,14 @@ private fun stepGame(
     updateFlags(mt, flagNodes, nanos)
     updateHill(mt, rig.hillNodes, nanos)
 
-    val dist = if (rig.scopeOn) SCOPE_DIST else CAM_DIST * rig.zoom
-    val pr = rig.camPitch * DEG_TO_RAD
+    val zoomNow = if (LOCK_VIEW) 1f else rig.zoom          // locked view: ignore any zoom set elsewhere
+    val pitchNow = if (LOCK_VIEW) 0f else rig.camPitch
+    val dist = if (rig.scopeOn) SCOPE_DIST else CAM_DIST * zoomNow
+    val pr = pitchNow * DEG_TO_RAD
     val back = dist * cos(pr)
     val camY = rig.y + rig.jumpH * 0.4f
-    cameraNode.position = Position(rig.x - fx * back, camY + CAM_HEIGHT + dist * sin(pr), rig.z - fz * back)
+    val camH = if (rig.scopeOn) CAM_HEIGHT_SCOPE else CAM_HEIGHT
+    cameraNode.position = Position(rig.x - fx * back, camY + camH + dist * sin(pr), rig.z - fz * back)
     cameraNode.lookAt(Position(rig.x + fx * CAM_LOOK_AHEAD, camY + CAM_LOOK_Y, rig.z + fz * CAM_LOOK_AHEAD))
 }
 
