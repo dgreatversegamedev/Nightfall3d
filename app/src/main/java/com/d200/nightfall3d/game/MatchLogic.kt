@@ -39,6 +39,8 @@ import kotlin.random.Random
 //     path finder (NavGrid, at the bottom of this file) so they can walk around the walls.
 //
 // CHANGES IN THIS VERSION
+//  GRENADE + GAS: blast() hurts the enemies around a grenade explosion (walls block it) and gasHurt() hurts the enemies
+//     standing in a gas cloud. They are called from Throwables.kt. Nothing else in this file changed.
 //  0) BOT BULLETS are drawn by Game3DView.kt with bullet_bot.glb (WeaponSpecs.BOT_BULLET_GLB). BOT_BULLET_COUNT is now 32
 //     because every slot is one GLB model. Nothing else in this file changed.
 //  1) YOUR BULLET DAMAGE NOW COMES FROM THE GUN. bulletStep takes the gun's WeaponSpec (WeaponSpecs.kt) and how far
@@ -246,6 +248,7 @@ internal class MatchState(
     private var spawned = false
     private var punchDone = false
     private val auraAcc = FloatArray(bots.size)     // damage from the shield aura, collected until it is a whole HP
+    private val gasAcc = FloatArray(bots.size)      // damage from gas clouds, collected until it is a whole HP
 
     fun myKills(): Int = if (board >= 0) kills[0] else 0
 
@@ -548,6 +551,39 @@ internal class MatchState(
             if (whole >= 1) {
                 auraAcc[i] -= whole.toFloat()
                 addHit(b.x, b.y + 1.2f, b.z, 0)       // sparks on him
+                damageBot(b, whole, 0)
+            }
+        }
+    }
+
+    // Grenade: every enemy of yours inside the radius (and not behind a wall) takes damage. Full at the centre, 25% at the edge.
+    fun blast(x: Float, y: Float, z: Float, radius: Float, maxDmg: Int, rig: GameInput) {
+        val play = rig.play ?: return
+        if (over) return
+        for (b in bots) {
+            if (!b.alive) continue
+            if (teamMode && b.team == 0) continue
+            val d = hypot(b.x - x, b.z - z)
+            if (d > radius) continue
+            if (d > 0.8f && !los(play, x, y + 0.8f, z, b.x, b.y + 1.0f, b.z)) continue
+            val dmg = (maxDmg * (1f - 0.75f * d / radius)).roundToInt().coerceAtLeast(1)
+            addHit(b.x, b.y + 1.2f, b.z, 1)
+            damageBot(b, dmg, 0)
+        }
+    }
+
+    // Gas: every enemy of yours inside the cloud loses dps HP per second (collected in gasAcc, applied in whole HP).
+    fun gasHurt(x: Float, z: Float, radius: Float, dps: Float, dt: Float) {
+        if (over) return
+        for (b in bots) {
+            if (!b.alive) continue
+            if (teamMode && b.team == 0) continue
+            if (hypot(b.x - x, b.z - z) > radius) continue
+            val i = b.id - 1
+            gasAcc[i] += dps * dt
+            val whole = gasAcc[i].toInt()
+            if (whole >= 1) {
+                gasAcc[i] -= whole.toFloat()
                 damageBot(b, whole, 0)
             }
         }
