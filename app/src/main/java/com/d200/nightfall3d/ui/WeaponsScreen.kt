@@ -28,6 +28,7 @@ import com.d200.nightfall3d.game.GameApi
 import com.d200.nightfall3d.game.SHIELDS
 import com.d200.nightfall3d.game.ShieldDef
 import com.d200.nightfall3d.game.ShieldLoadout
+import com.d200.nightfall3d.game.ThrowLoadout
 import com.d200.nightfall3d.game.gunNames
 import com.d200.nightfall3d.ui.theme.*
 import com.google.android.filament.Engine
@@ -50,6 +51,8 @@ import io.github.sceneview.rememberNodes
 // Add a gun there and it shows up here by itself. TEST MODE: no buying.
 //
 // CHANGES IN THIS VERSION
+//  0) NEW TAB "GRENADES": Grenade and Gas. TAKE / REMOVE each one. The ones you take get a button on the match screen
+//     (ThrowLoadout in Throwables.kt). SHIELDS is now tab 7 and OTHERS tab 8.
 //  1) NEW TAB "SHIELDS": banners for every shield (the SHIELDS list in Shields.kt). Each banner shows the name,
 //     HARD / AD tag, how to unlock it and EQUIPPED. Tap a banner for the details, then EQUIP.
 //     TEST MODE (ShieldLoadout.TEST_MODE in Shields.kt): you can equip locked shields too.
@@ -106,14 +109,15 @@ private val LineColor = Color(0xFF232B28)
 private val DimText = Color(0xFF8A938F)
 private val TrackColor = Color(0xFF1C2421)
 
-private const val SHIELD_TAB = 6                // index of "SHIELDS" in the tab list
-private const val OTHERS_TAB = 7                // index of "OTHERS" (opens the items screen)
+private const val GRENADE_TAB = 6               // index of "GRENADES" in the tab list
+private const val SHIELD_TAB = 7                // index of "SHIELDS" in the tab list
+private const val OTHERS_TAB = 8                // index of "OTHERS" (opens the items screen)
 
 @Composable
 fun WeaponsScreen(api: GameApi, onBack: () -> Unit, onOpen: (String) -> Unit) {
     val names = remember { gunNames() }
     val rows = remember { names.map { gunRow(it) } }
-    val tabs = listOf("ALL", "RIFLE", "SMG", "SHOTGUN", "SNIPER", "MELEE", "SHIELDS", "OTHERS")
+    val tabs = listOf("ALL", "RIFLE", "SMG", "SHOTGUN", "SNIPER", "MELEE", "GRENADES", "SHIELDS", "OTHERS")
     var tab by remember { mutableStateOf(0) }
     val picked = remember { mutableStateListOf<String>().apply { addAll(GunLoadout.names(names)) } }
     var selName by remember { mutableStateOf(picked.firstOrNull() ?: (names.firstOrNull() ?: "")) }
@@ -200,6 +204,8 @@ fun WeaponsScreen(api: GameApi, onBack: () -> Unit, onOpen: (String) -> Unit) {
                         shieldEquipped = it
                     }
                 )
+            } else if (tab == GRENADE_TAB) {
+                ThrowablesPane(Modifier.fillMaxWidth().weight(1f))
             } else {
                 Row(
                     Modifier.fillMaxWidth().weight(1f),
@@ -312,6 +318,8 @@ fun WeaponsScreen(api: GameApi, onBack: () -> Unit, onOpen: (String) -> Unit) {
                         NfText("Test mode: every shield can be equipped.", size = 12, color = DimText)
                     }
                 }
+            } else if (tab == GRENADE_TAB) {
+                NfText("What you take here gets a button on the left of the match screen.", size = 12, color = DimText)
             } else {
                 Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(12.dp)) {
                     NfText(
@@ -323,6 +331,78 @@ fun WeaponsScreen(api: GameApi, onBack: () -> Unit, onOpen: (String) -> Unit) {
                     NfText("You can only select ${GunLoadout.MAX} weapons for now.", size = 12, color = DimText)
                 }
             }
+        }
+    }
+}
+
+// ---------------- Grenade + Gas ----------------
+
+@Composable
+private fun ThrowablesPane(modifier: Modifier) {
+    var grenadeOn by remember { mutableStateOf(ThrowLoadout.grenadeOn) }
+    var gasOn by remember { mutableStateOf(ThrowLoadout.gasOn) }
+    Row(modifier, horizontalArrangement = Arrangement.spacedBy(14.dp)) {
+        ThrowCard(
+            Modifier.weight(1f).fillMaxHeight(),
+            "GRENADE",
+            "Goes off 2 seconds after you throw it. Big damage close to the blast, less far away. Walls block it. ${ThrowLoadout.GRENADE_COUNT} per match.",
+            listOf("Damage" to 0.9f, "Radius" to 0.55f, "Fuse" to 0.4f),
+            grenadeOn
+        ) {
+            grenadeOn = !grenadeOn
+            ThrowLoadout.grenadeOn = grenadeOn
+        }
+        ThrowCard(
+            Modifier.weight(1f).fillMaxHeight(),
+            "GAS",
+            "Leaves a green cloud for 8 seconds. Everyone standing in it loses HP every second. ${ThrowLoadout.GAS_COUNT} per match.",
+            listOf("Damage" to 0.5f, "Radius" to 0.5f, "Duration" to 0.8f),
+            gasOn
+        ) {
+            gasOn = !gasOn
+            ThrowLoadout.gasOn = gasOn
+        }
+    }
+}
+
+@Composable
+private fun ThrowCard(
+    modifier: Modifier,
+    name: String,
+    desc: String,
+    bars: List<Pair<String, Float>>,
+    taken: Boolean,
+    onToggle: () -> Unit
+) {
+    val shape = RoundedCornerShape(8.dp)
+    Column(
+        modifier
+            .clip(shape)
+            .background(PanelBg)
+            .border(1.dp, if (taken) Accent else LineColor, shape)
+            .padding(14.dp)
+    ) {
+        Column(
+            Modifier.weight(1f).fillMaxWidth().verticalScroll(rememberScrollState()),
+            verticalArrangement = Arrangement.spacedBy(8.dp)
+        ) {
+            NfText(name, size = 24, bold = true)
+            NfText(desc, size = 12, color = DimText)
+            bars.forEach { AccentBar(it.first, it.second) }
+        }
+        Spacer(Modifier.height(10.dp))
+        val btnShape = RoundedCornerShape(8.dp)
+        Box(
+            Modifier
+                .fillMaxWidth()
+                .height(52.dp)
+                .clip(btnShape)
+                .background(if (taken) CardBg else Accent)
+                .border(1.5.dp, Accent, btnShape)
+                .clickable { onToggle() },
+            contentAlignment = Alignment.Center
+        ) {
+            NfText(if (taken) "REMOVE" else "TAKE", size = 15, bold = true, color = if (taken) Accent else OnAccent)
         }
     }
 }
