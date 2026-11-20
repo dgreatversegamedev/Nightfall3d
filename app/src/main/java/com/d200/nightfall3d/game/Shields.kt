@@ -1,10 +1,13 @@
 package com.d200.nightfall3d.game
 
 // =====================================================================
-// Shields.kt  -  the list of shields (NEW FILE, put it in the game folder).
+// Shields.kt  -  the list of shields (put it in the game folder).
 // Add or change a shield here: it shows up in Weapons > SHIELDS by itself.
 //
-// TEST MODE: ShieldLoadout.TEST_MODE = true lets you equip any shield, even a locked one.
+// Each shield now has a GLB file (glb = ...) in app/src/main/assets/.
+// The shield you equip is the one loaded in the arena (ShieldLoadout.selected).
+//
+// TEST MODE: ShieldLoadout.TEST_MODE = true lets you equip any shield, even a locked or AD one.
 // Set it to false when buying and ads are really connected.
 //
 // maxHits   = how many hits the shield takes before it breaks
@@ -19,6 +22,7 @@ internal class ShieldDef(
     val id: String,
     val name: String,
     val style: ShieldStyle,
+    val glb: String,                 // file in app/src/main/assets/
     val description: String,
     val hard: Boolean,
     val unlockLevel: Int,
@@ -43,6 +47,7 @@ internal class ShieldDef(
 internal val SHIELDS = listOf(
     ShieldDef(
         id = "classic", name = "Classic Hex", style = ShieldStyle.CLASSIC,
+        glb = "nightfall_shield_blue_hex.glb",
         description = "Standard energy shield. Blocks all damage until it breaks.",
         hard = false, unlockLevel = 0, priceCoins = 0, ad = false,
         maxHits = 25f, reviveSec = 20f, auraDps = 0f, auraR = 0f,
@@ -50,13 +55,15 @@ internal val SHIELDS = listOf(
     ),
     ShieldDef(
         id = "vortex", name = "Vortex", style = ShieldStyle.VORTEX,
-        description = "Hard shield. Magical spinning smoke. You can see and shoot through it. Enemies that come close lose HP. Slower to grow back.",
-        hard = true, unlockLevel = 20, priceCoins = 0, ad = false,
+        glb = "nightfall_shield_pink.glb",
+        description = "Ad shield. Magical spinning smoke. Enemies that come close lose HP. Slower to grow back.",
+        hard = false, unlockLevel = 0, priceCoins = 0, ad = true,
         maxHits = 35f, reviveSec = 30f, auraDps = 12f, auraR = 2.4f,
         accent = 0xFFB04CFFL
     ),
     ShieldDef(
         id = "prism", name = "Prism Barrier", style = ShieldStyle.TRIANGLE,
+        glb = "nightfall_shield_geo_triangles.glb",
         description = "Hard shield. Blue triangle plates, the strongest shield. A shock field hurts enemies that come close.",
         hard = true, unlockLevel = 0, priceCoins = 50000, ad = false,
         maxHits = 60f, reviveSec = 25f, auraDps = 6f, auraR = 2.0f,
@@ -64,13 +71,15 @@ internal val SHIELDS = listOf(
     ),
     ShieldDef(
         id = "tech", name = "Tech Dome", style = ShieldStyle.TECH,
-        description = "Tech dome with spinning circuit rings on the floor.",
+        glb = "nightfall_shield_hex_sphere.glb",
+        description = "Tech dome with a hex sphere pattern.",
         hard = false, unlockLevel = 50, priceCoins = 0, ad = false,
         maxHits = 30f, reviveSec = 18f, auraDps = 0f, auraR = 0f,
         accent = 0xFF19D2E4L
     ),
     ShieldDef(
         id = "spark", name = "Storm Spark", style = ShieldStyle.SPARK,
+        glb = "shield_storm_spark.glb",
         description = "Ad shield. Lightning inside a cloud of smoke. Enemies that come close get shocked and lose HP.",
         hard = false, unlockLevel = 0, priceCoins = 0, ad = true,
         maxHits = 25f, reviveSec = 20f, auraDps = 10f, auraR = 2.8f,
