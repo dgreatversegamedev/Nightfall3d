@@ -39,15 +39,23 @@ import kotlin.random.Random
 //     path finder (NavGrid, at the bottom of this file) so they can walk around the walls.
 //
 // CHANGES IN THIS VERSION
-//  1) SHIELD NOW REALLY PROTECTS YOUR HP: while the shield is on, bullets do no damage to your HP at all
+//  0) BOT BULLETS are drawn by Game3DView.kt with bullet_bot.glb (WeaponSpecs.BOT_BULLET_GLB). BOT_BULLET_COUNT is now 32
+//     because every slot is one GLB model. Nothing else in this file changed.
+//  1) YOUR BULLET DAMAGE NOW COMES FROM THE GUN. bulletStep takes the gun's WeaponSpec (WeaponSpecs.kt) and how far
+//     the bullet has flown. Damage = spec.damageAt(distance, headshot): it drops with distance (rifles, SMG) and a hit
+//     above HEAD_Y (1.45 m over the feet) is a headshot (x headshotMultiplier). The old PLAYER_BULLET_DMG is only used
+//     if no spec is given. Bot bullets are unchanged (BOT_BULLET_DMG).
+//     The damage numbers in WeaponSpecs.kt are out of 100 because bots have BOT_MAX_HP = 100.
+// (older)
+//  - SHIELD NOW REALLY PROTECTS YOUR HP: while the shield is on, bullets do no damage to your HP at all
 //     (SHIELD_KEEP = 0). The shield itself is used up by the hits (see maxHits in Shields.kt),
 //     and when it breaks your HP is exposed again until it grows back.
 //     If you want a leak, set SHIELD_KEEP to 0.1 (you take 10% of the damage).
-//  2) MatchSettings.blueBots / redBots: the Match Setup screen chooses how many bots are on each team
+//  - MatchSettings.blueBots / redBots: the Match Setup screen chooses how many bots are on each team
 //     (Team Deathmatch and Capture the Flag). MAX_BOTS is now 8 in total.
-//  3) When a bullet hits you while your shield is on, the hit is sent to the shield effect (rig.shieldHitT + direction)
+//  - When a bullet hits you while your shield is on, the hit is sent to the shield effect (rig.shieldHitT + direction)
 //     and makes sparks instead of blood.
-//  4) SHIELD DAMAGE AURA (shieldAura below): some shields (Vortex, Prism Barrier, Storm Spark) hurt enemies that
+//  - SHIELD DAMAGE AURA (shieldAura below): some shields (Vortex, Prism Barrier, Storm Spark) hurt enemies that
 //     stand close to you while the shield is on. The numbers (auraDps, auraR) are in Shields.kt.
 // =====================================================================
 
@@ -60,15 +68,16 @@ object MatchSettings {
 
 internal const val PLAYER_MAX_HP = 200
 internal const val BOT_MAX_HP = 100
-internal const val BOT_BULLET_COUNT = 48
+internal const val BOT_BULLET_COUNT = 32      // one bullet_bot.glb model per slot (was 48; lower = less RAM)
 
 // flag states
 internal const val F_HOME = 0          // flag is at its base
 internal const val F_CARRIED = 1       // somebody is carrying it
 internal const val F_DROPPED = 2       // lying on the ground where the carrier was eliminated
 
-private const val PLAYER_BULLET_DMG = 20      // your bullet damage
+private const val PLAYER_BULLET_DMG = 20      // your bullet damage (only used when bulletStep gets no gun spec)
 private const val BOT_BULLET_DMG = 9          // bot bullet damage (low, so the test is fair)
+private const val HEAD_Y = 1.45f              // a bullet this high above the feet is a headshot
 private const val PUNCH_DMG = 40
 private const val PUNCH_RANGE = 1.4f
 private const val SHIELD_KEEP = 0f            // with the shield on you take this part of the damage (0 = none, 0.3 = 30%)
@@ -310,7 +319,12 @@ internal class MatchState(
 
     // One bullet step. Returns true if the bullet hit a fighter (the bullet is then used up).
     // owner = fighter id of whoever shot it (0 = you).
-    fun bulletStep(x: Float, y: Float, z: Float, owner: Int, rig: GameInput): Boolean {
+    // spec + travelled: the gun you shot with and how many meters the bullet has flown. Only for YOUR bullets.
+    // They decide the damage (falls off with distance, headshot bonus).
+    fun bulletStep(
+        x: Float, y: Float, z: Float, owner: Int, rig: GameInput,
+        spec: WeaponSpec? = null, travelled: Float = 0f
+    ): Boolean {
         if (over) return false
         for (id in 0..bots.size) {
             if (id == owner || !isAlive(id) || teamOf(id) == teamOf(owner)) continue
@@ -319,7 +333,12 @@ internal class MatchState(
             if (dx * dx + dz * dz > HIT_RADIUS * HIT_RADIUS) continue
             val fy = feetY(id, rig)
             if (y < fy || y > fy + HIT_HEIGHT) continue
-            val dmg = if (owner == 0) PLAYER_BULLET_DMG else BOT_BULLET_DMG
+            val dmg = if (owner == 0) {
+                if (spec != null) {
+                    val head = y > fy + HEAD_Y
+                    spec.damageAt(travelled, head).roundToInt().coerceAtLeast(1)
+                } else PLAYER_BULLET_DMG
+            } else BOT_BULLET_DMG
             if (id == 0 && rig.shieldOn) {
                 // the shield took the hit: sparks (no blood) + tell the shield effect where it was hit
                 addHit(x, y, z, 0)
