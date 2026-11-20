@@ -4,8 +4,10 @@ import android.util.Log
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.runtime.Composable
@@ -18,10 +20,14 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.unit.dp
 import com.d200.nightfall3d.game.GUNS
 import com.d200.nightfall3d.game.GameApi
+import com.d200.nightfall3d.game.SHIELDS
+import com.d200.nightfall3d.game.ShieldDef
+import com.d200.nightfall3d.game.ShieldLoadout
 import com.d200.nightfall3d.game.gunNames
 import com.d200.nightfall3d.ui.theme.*
 import com.google.android.filament.Engine
@@ -43,13 +49,12 @@ import io.github.sceneview.rememberNodes
 // Lists every gun that is uploaded into the game (the GUNS list in Game3DView.kt).
 // Add a gun there and it shows up here by itself. TEST MODE: no buying.
 //
-// CHANGES IN THIS VERSION (Build 1 fixes)
-//  1) Each gun is shown with its REAL 3D model (the same .glb file the game uses, so the app does not get bigger).
-//     The cards turn slowly; the big preview on the right turns too.
-//  2) The SELECT / REMOVE button is always full size (52 dp) and pinned at the bottom. Only the info above it scrolls.
-//  3) Orange accent (was green).
-//  4) BUILD FIX: the SELECT button now uses a plain copy of the gun name (selectedName),
-//     so the click no longer reads sel.name inside the click lambda.
+// CHANGES IN THIS VERSION
+//  1) NEW TAB "SHIELDS": banners for every shield (the SHIELDS list in Shields.kt). Each banner shows the name,
+//     HARD / AD tag, how to unlock it and EQUIPPED. Tap a banner for the details, then EQUIP.
+//     TEST MODE (ShieldLoadout.TEST_MODE in Shields.kt): you can equip locked shields too.
+//  2) The tab row scrolls sideways, because there are more tabs now.
+//  3) OTHERS moved to the last tab (still opens the items screen).
 //
 // LOADOUT: you can select only 5 weapons for now (GunLoadout.MAX). The first one selected is the starting gun.
 // TO GIVE A GUN ITS REAL INFO, edit GUN_INFO below.
@@ -101,16 +106,24 @@ private val LineColor = Color(0xFF232B28)
 private val DimText = Color(0xFF8A938F)
 private val TrackColor = Color(0xFF1C2421)
 
+private const val SHIELD_TAB = 6                // index of "SHIELDS" in the tab list
+private const val OTHERS_TAB = 7                // index of "OTHERS" (opens the items screen)
+
 @Composable
 fun WeaponsScreen(api: GameApi, onBack: () -> Unit, onOpen: (String) -> Unit) {
     val names = remember { gunNames() }
     val rows = remember { names.map { gunRow(it) } }
-    val tabs = listOf("ALL", "RIFLE", "SMG", "SHOTGUN", "SNIPER", "MELEE", "OTHERS")
+    val tabs = listOf("ALL", "RIFLE", "SMG", "SHOTGUN", "SNIPER", "MELEE", "SHIELDS", "OTHERS")
     var tab by remember { mutableStateOf(0) }
     val picked = remember { mutableStateListOf<String>().apply { addAll(GunLoadout.names(names)) } }
     var selName by remember { mutableStateOf(picked.firstOrNull() ?: (names.firstOrNull() ?: "")) }
     val list = if (tab == 0) rows else rows.filter { it.info.category.equals(tabs[tab], ignoreCase = true) }
     val sel: GunRow? = rows.firstOrNull { it.name == selName } ?: rows.firstOrNull()
+
+    // shields
+    val level = remember { api.profile().level }
+    var shieldView by remember { mutableStateOf(ShieldLoadout.selected.coerceIn(0, SHIELDS.lastIndex)) }
+    var shieldEquipped by remember { mutableStateOf(ShieldLoadout.selected.coerceIn(0, SHIELDS.lastIndex)) }
 
     // ONE 3D engine shared by every gun picture on this screen (light on memory)
     val engine = rememberEngine()
@@ -151,12 +164,15 @@ fun WeaponsScreen(api: GameApi, onBack: () -> Unit, onOpen: (String) -> Unit) {
             }
 
             // tabs
-            Row(horizontalArrangement = Arrangement.spacedBy(22.dp)) {
+            Row(
+                Modifier.horizontalScroll(rememberScrollState()),
+                horizontalArrangement = Arrangement.spacedBy(20.dp)
+            ) {
                 tabs.forEachIndexed { i, t ->
                     val on = i == tab
                     Column(
                         Modifier.clickable {
-                            if (i == 6) onOpen("items") else tab = i
+                            if (i == OTHERS_TAB) onOpen("items") else tab = i
                         },
                         horizontalAlignment = Alignment.CenterHorizontally
                     ) {
@@ -172,114 +188,305 @@ fun WeaponsScreen(api: GameApi, onBack: () -> Unit, onOpen: (String) -> Unit) {
                 }
             }
 
-            Row(
-                Modifier.fillMaxWidth().weight(1f),
-                horizontalArrangement = Arrangement.spacedBy(14.dp)
-            ) {
-                // left: the uploaded guns (real 3D pictures)
-                Column(
-                    Modifier.weight(1.5f).fillMaxHeight().verticalScroll(rememberScrollState()),
-                    verticalArrangement = Arrangement.spacedBy(8.dp)
-                ) {
-                    NfText("UPLOADED GUNS  ${list.size}", size = 11, bold = true, color = DimText)
-                    if (list.isEmpty()) {
-                        NfText("No guns here yet", size = 13, color = DimText)
+            if (tab == SHIELD_TAB) {
+                ShieldsPane(
+                    Modifier.fillMaxWidth().weight(1f),
+                    level,
+                    shieldView,
+                    shieldEquipped,
+                    { shieldView = it },
+                    {
+                        ShieldLoadout.selected = it
+                        shieldEquipped = it
                     }
-                    list.chunked(3).forEach { row ->
-                        Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                            row.forEach { g ->
-                                GunCard(
-                                    g,
-                                    g.name == selName,
-                                    g.name in picked,
-                                    engine, modelLoader, environment,
-                                    Modifier.weight(1f).height(110.dp)
-                                ) { selName = g.name }
+                )
+            } else {
+                Row(
+                    Modifier.fillMaxWidth().weight(1f),
+                    horizontalArrangement = Arrangement.spacedBy(14.dp)
+                ) {
+                    // left: the uploaded guns (real 3D pictures)
+                    Column(
+                        Modifier.weight(1.5f).fillMaxHeight().verticalScroll(rememberScrollState()),
+                        verticalArrangement = Arrangement.spacedBy(8.dp)
+                    ) {
+                        NfText("UPLOADED GUNS  ${list.size}", size = 11, bold = true, color = DimText)
+                        if (list.isEmpty()) {
+                            NfText("No guns here yet", size = 13, color = DimText)
+                        }
+                        list.chunked(3).forEach { row ->
+                            Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                                row.forEach { g ->
+                                    GunCard(
+                                        g,
+                                        g.name == selName,
+                                        g.name in picked,
+                                        engine, modelLoader, environment,
+                                        Modifier.weight(1f).height(110.dp)
+                                    ) { selName = g.name }
+                                }
+                                repeat(3 - row.size) { Spacer(Modifier.weight(1f)) }
                             }
-                            repeat(3 - row.size) { Spacer(Modifier.weight(1f)) }
                         }
                     }
-                }
 
-                // right: details. The info scrolls, the button stays big at the bottom.
-                if (sel != null) {
-                    val panelShape = RoundedCornerShape(8.dp)
-                    val selectedName: String = sel.name      // plain copy, used by the button click below
-                    Column(
-                        Modifier
-                            .weight(1f)
-                            .fillMaxHeight()
-                            .clip(panelShape)
-                            .background(PanelBg)
-                            .border(1.dp, LineColor, panelShape)
-                            .padding(14.dp)
-                    ) {
+                    // right: details. The info scrolls, the button stays big at the bottom.
+                    if (sel != null) {
+                        val panelShape = RoundedCornerShape(8.dp)
+                        val selectedName: String = sel.name      // plain copy, used by the button click below
                         Column(
-                            Modifier.weight(1f).fillMaxWidth().verticalScroll(rememberScrollState()),
-                            verticalArrangement = Arrangement.spacedBy(8.dp)
+                            Modifier
+                                .weight(1f)
+                                .fillMaxHeight()
+                                .clip(panelShape)
+                                .background(PanelBg)
+                                .border(1.dp, LineColor, panelShape)
+                                .padding(14.dp)
                         ) {
-                            NfText(selectedName, size = 24, bold = true)
-                            if (sel.info.description.isNotEmpty()) {
-                                NfText(sel.info.description, size = 12, color = DimText)
+                            Column(
+                                Modifier.weight(1f).fillMaxWidth().verticalScroll(rememberScrollState()),
+                                verticalArrangement = Arrangement.spacedBy(8.dp)
+                            ) {
+                                NfText(selectedName, size = 24, bold = true)
+                                if (sel.info.description.isNotEmpty()) {
+                                    NfText(sel.info.description, size = 12, color = DimText)
+                                }
+                                Box(
+                                    Modifier
+                                        .fillMaxWidth()
+                                        .height(120.dp)
+                                        .clip(RoundedCornerShape(6.dp))
+                                        .background(CardBg)
+                                ) {
+                                    key(selectedName) {
+                                        GunPicture(engine, modelLoader, environment, sel.file, Modifier.fillMaxSize(), 0f)
+                                    }
+                                }
+                                AccentBar("Damage", sel.info.damage)
+                                AccentBar("Range", sel.info.range)
+                                AccentBar("Accuracy", sel.info.accuracy)
+                                AccentBar("Magazine", sel.info.magazine)
                             }
+
+                            Spacer(Modifier.height(10.dp))
+
+                            val isPicked = selectedName in picked
+                            val full = picked.size >= GunLoadout.MAX
+                            // SELECT is orange. REMOVE, and SELECT when the 5 are full, are dark.
+                            val canClick = if (isPicked) picked.size > 1 else !full
+                            val filled = !isPicked && !full
+                            val label = if (isPicked) "REMOVE" else if (full) "5 / 5 FULL" else "SELECT"
+                            val btnShape = RoundedCornerShape(8.dp)
                             Box(
                                 Modifier
                                     .fillMaxWidth()
-                                    .height(120.dp)
-                                    .clip(RoundedCornerShape(6.dp))
-                                    .background(CardBg)
+                                    .height(52.dp)                       // big enough to tap
+                                    .clip(btnShape)
+                                    .background(if (filled) Accent else CardBg)
+                                    .border(1.5.dp, if (canClick) Accent else LineColor, btnShape)
+                                    .clickable(enabled = canClick) { toggle(selectedName) },
+                                contentAlignment = Alignment.Center
                             ) {
-                                key(selectedName) {
-                                    GunPicture(engine, modelLoader, environment, sel.file, Modifier.fillMaxSize(), 0f)
-                                }
+                                NfText(
+                                    label,
+                                    size = 15,
+                                    bold = true,
+                                    color = if (filled) OnAccent else if (canClick) Accent else DimText
+                                )
                             }
-                            AccentBar("Damage", sel.info.damage)
-                            AccentBar("Range", sel.info.range)
-                            AccentBar("Accuracy", sel.info.accuracy)
-                            AccentBar("Magazine", sel.info.magazine)
-                        }
-
-                        Spacer(Modifier.height(10.dp))
-
-                        val isPicked = selectedName in picked
-                        val full = picked.size >= GunLoadout.MAX
-                        // SELECT is orange. REMOVE, and SELECT when the 5 are full, are dark.
-                        val canClick = if (isPicked) picked.size > 1 else !full
-                        val filled = !isPicked && !full
-                        val label = if (isPicked) "REMOVE" else if (full) "5 / 5 FULL" else "SELECT"
-                        val btnShape = RoundedCornerShape(8.dp)
-                        Box(
-                            Modifier
-                                .fillMaxWidth()
-                                .height(52.dp)                       // big enough to tap
-                                .clip(btnShape)
-                                .background(if (filled) Accent else CardBg)
-                                .border(1.5.dp, if (canClick) Accent else LineColor, btnShape)
-                                .clickable(enabled = canClick) { toggle(selectedName) },
-                            contentAlignment = Alignment.Center
-                        ) {
-                            NfText(
-                                label,
-                                size = 15,
-                                bold = true,
-                                color = if (filled) OnAccent else if (canClick) Accent else DimText
-                            )
                         }
                     }
                 }
             }
 
-            // bottom: how many weapons are selected
-            Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(12.dp)) {
-                NfText(
-                    "Selected ${picked.size} / ${GunLoadout.MAX} weapons",
-                    size = 14,
-                    bold = true,
-                    color = Accent
-                )
-                NfText("You can only select ${GunLoadout.MAX} weapons for now.", size = 12, color = DimText)
+            // bottom line
+            if (tab == SHIELD_TAB) {
+                Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(12.dp)) {
+                    NfText(
+                        "Equipped: ${SHIELDS[shieldEquipped.coerceIn(0, SHIELDS.lastIndex)].name}",
+                        size = 14,
+                        bold = true,
+                        color = Accent
+                    )
+                    if (ShieldLoadout.TEST_MODE) {
+                        NfText("Test mode: every shield can be equipped.", size = 12, color = DimText)
+                    }
+                }
+            } else {
+                Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(12.dp)) {
+                    NfText(
+                        "Selected ${picked.size} / ${GunLoadout.MAX} weapons",
+                        size = 14,
+                        bold = true,
+                        color = Accent
+                    )
+                    NfText("You can only select ${GunLoadout.MAX} weapons for now.", size = 12, color = DimText)
+                }
             }
         }
+    }
+}
+
+// ---------------- Shields ----------------
+
+/** Left: one banner per shield. Right: details of the tapped shield and the EQUIP button. */
+@Composable
+private fun ShieldsPane(
+    modifier: Modifier,
+    level: Int,
+    viewIdx: Int,
+    equippedIdx: Int,
+    onView: (Int) -> Unit,
+    onEquip: (Int) -> Unit
+) {
+    val vi = viewIdx.coerceIn(0, SHIELDS.lastIndex)
+    val d = SHIELDS[vi]
+    val accent = Color(d.accent)
+    Row(modifier, horizontalArrangement = Arrangement.spacedBy(14.dp)) {
+        Column(
+            Modifier.weight(1.5f).fillMaxHeight().verticalScroll(rememberScrollState()),
+            verticalArrangement = Arrangement.spacedBy(8.dp)
+        ) {
+            NfText("SHIELDS  ${SHIELDS.size}", size = 11, bold = true, color = DimText)
+            SHIELDS.forEachIndexed { i, s ->
+                ShieldBanner(s, i == equippedIdx, i == vi, level, Modifier.fillMaxWidth().height(76.dp)) { onView(i) }
+            }
+        }
+
+        val panelShape = RoundedCornerShape(8.dp)
+        Column(
+            Modifier
+                .weight(1f)
+                .fillMaxHeight()
+                .clip(panelShape)
+                .background(PanelBg)
+                .border(1.dp, LineColor, panelShape)
+                .padding(14.dp)
+        ) {
+            Column(
+                Modifier.weight(1f).fillMaxWidth().verticalScroll(rememberScrollState()),
+                verticalArrangement = Arrangement.spacedBy(8.dp)
+            ) {
+                NfText(d.name, size = 24, bold = true)
+                Row(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+                    if (d.hard) ShieldTag("HARD", accent)
+                    if (d.ad) ShieldTag("AD", accent)
+                    if (d.auraDps > 0f) ShieldTag("DAMAGES NEARBY", accent)
+                }
+                NfText(d.description, size = 12, color = DimText)
+                Box(
+                    Modifier.fillMaxWidth().height(110.dp).clip(RoundedCornerShape(6.dp)).background(CardBg),
+                    contentAlignment = Alignment.Center
+                ) {
+                    ShieldOrb(accent, Modifier.size(92.dp))
+                }
+                AccentBar("Strength", (d.maxHits / 60f).coerceIn(0.05f, 1f))
+                AccentBar("Recharge", (1f - (d.reviveSec - 15f) / 20f).coerceIn(0.05f, 1f))
+                AccentBar("Damage", (d.auraDps / 15f).coerceIn(0f, 1f))
+                NfText("Unlock: ${d.unlockText()}", size = 12, bold = true, color = DimText)
+            }
+
+            Spacer(Modifier.height(10.dp))
+
+            val equipped = vi == equippedIdx
+            val ok = d.availableAt(level)
+            val canEquip = !equipped && (ok || ShieldLoadout.TEST_MODE)
+            val label = if (equipped) "EQUIPPED" else if (ok) "EQUIP" else if (ShieldLoadout.TEST_MODE) "EQUIP (TEST)" else "LOCKED"
+            val filled = canEquip
+            val btnShape = RoundedCornerShape(8.dp)
+            Box(
+                Modifier
+                    .fillMaxWidth()
+                    .height(52.dp)
+                    .clip(btnShape)
+                    .background(if (filled) Accent else CardBg)
+                    .border(1.5.dp, if (canEquip || equipped) Accent else LineColor, btnShape)
+                    .clickable(enabled = canEquip) { onEquip(vi) },
+                contentAlignment = Alignment.Center
+            ) {
+                NfText(
+                    label,
+                    size = 15,
+                    bold = true,
+                    color = if (filled) OnAccent else if (equipped) Accent else DimText
+                )
+            }
+        }
+    }
+}
+
+@Composable
+private fun ShieldBanner(
+    def: ShieldDef,
+    equipped: Boolean,
+    viewing: Boolean,
+    level: Int,
+    modifier: Modifier,
+    onClick: () -> Unit
+) {
+    val shape = RoundedCornerShape(6.dp)
+    val accent = Color(def.accent)
+    val ok = def.availableAt(level)
+    Box(
+        modifier
+            .clip(shape)
+            .background(Brush.horizontalGradient(listOf(accent.copy(alpha = 0.30f), CardBg, CardBg)))
+            .border(if (viewing) 1.5.dp else 1.dp, if (viewing) Accent else LineColor, shape)
+            .clickable { onClick() }
+    ) {
+        Row(
+            Modifier.fillMaxSize().padding(horizontal = 12.dp, vertical = 8.dp),
+            verticalAlignment = Alignment.CenterVertically,
+            horizontalArrangement = Arrangement.spacedBy(12.dp)
+        ) {
+            ShieldOrb(accent, Modifier.size(52.dp))
+            Column(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(3.dp)) {
+                Row(
+                    verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.spacedBy(6.dp)
+                ) {
+                    NfText(def.name.uppercase(), size = 15, bold = true)
+                    if (def.hard) ShieldTag("HARD", accent)
+                    if (def.ad) ShieldTag("AD", accent)
+                }
+                NfText(def.unlockText(), size = 11, color = DimText)
+            }
+            NfText(
+                if (equipped) "EQUIPPED" else if (ok) "UNLOCKED" else "LOCKED",
+                size = 11,
+                bold = true,
+                color = if (equipped) Accent else DimText
+            )
+        }
+    }
+}
+
+/** A glowing ball in the shield colour (a light picture of the shield). */
+@Composable
+private fun ShieldOrb(color: Color, modifier: Modifier) {
+    Box(
+        modifier
+            .clip(CircleShape)
+            .background(
+                Brush.radialGradient(
+                    listOf(color.copy(alpha = 0.10f), color.copy(alpha = 0.35f), color.copy(alpha = 0.75f))
+                )
+            )
+            .border(1.5.dp, color, CircleShape)
+    )
+}
+
+@Composable
+private fun ShieldTag(text: String, color: Color) {
+    val shape = RoundedCornerShape(4.dp)
+    Box(
+        Modifier
+            .clip(shape)
+            .background(color.copy(alpha = 0.18f))
+            .border(1.dp, color.copy(alpha = 0.8f), shape)
+            .padding(horizontal = 6.dp, vertical = 2.dp)
+    ) {
+        NfText(text, size = 9, bold = true, color = color)
     }
 }
 
