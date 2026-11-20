@@ -19,6 +19,7 @@ import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
 import com.d200.nightfall3d.game.GameApi
 import com.d200.nightfall3d.game.GameMode
+import com.d200.nightfall3d.game.MatchConfig
 import com.d200.nightfall3d.game.MatchSettings
 import com.d200.nightfall3d.ui.theme.*
 
@@ -32,10 +33,41 @@ fun MatchSetupScreen(api: GameApi, onBack: () -> Unit, onOpen: (String) -> Unit)
     var autoPickup by remember { mutableStateOf(api.match.autoPickup) }
     var weaponLimit by remember { mutableStateOf(api.match.weaponLimit) }
     var time by remember { mutableStateOf(api.match.timeLimit) }
-    // number of bots in the match (Deathmatch / Team Deathmatch test)
+    // number of bots in the match (Deathmatch only)
     var bots by remember { mutableStateOf(MatchSettings.botCount.coerceIn(1, MatchSettings.MAX_BOTS)) }
+    // team sizes (Team Deathmatch, Capture the Flag, Zombies). myTeam includes you.
+    var myTeam by remember { mutableStateOf(api.match.myTeam.coerceIn(1, MatchConfig.MAX_TEAM)) }
+    var otherTeam by remember { mutableStateOf(api.match.otherTeam.coerceIn(1, MatchConfig.MAX_TEAM)) }
 
-    val botMode = modes[modeIdx] == GameMode.DEATHMATCH || modes[modeIdx] == GameMode.TEAM_DEATHMATCH
+    val mode = modes[modeIdx]
+    val isDeathmatch = mode == GameMode.DEATHMATCH
+    val isTeamMode = mode == GameMode.TEAM_DEATHMATCH || mode == GameMode.CAPTURE_FLAG
+    val isZombies = mode == GameMode.ZOMBIES
+
+    // Keeps the old bot count in step with the chosen mode and team sizes,
+    // so the match that starts always has the right number of bots.
+    fun applyBots() {
+        api.match.myTeam = myTeam
+        api.match.otherTeam = otherTeam
+        when (modes[modeIdx]) {
+            GameMode.DEATHMATCH ->
+                MatchSettings.botCount = bots.coerceIn(1, MatchSettings.MAX_BOTS)
+            GameMode.TEAM_DEATHMATCH, GameMode.CAPTURE_FLAG ->
+                // your teammates (everyone on your team except you) + the other team
+                MatchSettings.botCount = ((myTeam - 1) + otherTeam).coerceIn(1, MatchSettings.MAX_BOTS)
+            GameMode.ZOMBIES ->
+                // your teammates only, the zombies come later
+                MatchSettings.botCount = (myTeam - 1).coerceIn(0, MatchSettings.MAX_BOTS)
+            else -> {}
+        }
+    }
+
+    val counterText = when {
+        isDeathmatch -> "${bots + 1}/${MatchSettings.MAX_BOTS + 1}"
+        isTeamMode -> "${myTeam + otherTeam}/${MatchConfig.MAX_TEAM * 2}"
+        isZombies -> "$myTeam/${MatchConfig.MAX_TEAM}"
+        else -> "4/16"
+    }
 
     NfScreen(
         "MATCH SETUP",
@@ -46,17 +78,13 @@ fun MatchSetupScreen(api: GameApi, onBack: () -> Unit, onOpen: (String) -> Unit)
                 horizontalArrangement = Arrangement.spacedBy(6.dp)
             ) {
                 NfIcon(NfIconKind.GROUP, Modifier.size(18.dp), NfColors.TextDim)
-                NfText(
-                    if (botMode) "${bots + 1}/${MatchSettings.MAX_BOTS + 1}" else "4/16",
-                    size = 13,
-                    color = NfColors.TextDim
-                )
+                NfText(counterText, size = 13, color = NfColors.TextDim)
             }
         }
     ) {
         Row(Modifier.fillMaxSize(), horizontalArrangement = Arrangement.spacedBy(12.dp)) {
 
-            // Left: mode, map, bots, preview, invite
+            // Left: mode, map, bots / teams, preview, invite
             Column(
                 Modifier.weight(1f).fillMaxHeight(),
                 verticalArrangement = Arrangement.spacedBy(8.dp)
@@ -64,15 +92,17 @@ fun MatchSetupScreen(api: GameApi, onBack: () -> Unit, onOpen: (String) -> Unit)
                 Selector(
                     NfIconKind.TARGET,
                     "MODE",
-                    modes[modeIdx].label,
-                    modes[modeIdx].tagline,
+                    mode.label,
+                    mode.tagline,
                     onPrev = {
                         modeIdx = (modeIdx + modes.size - 1) % modes.size
                         api.match.mode = modes[modeIdx]
+                        applyBots()
                     },
                     onNext = {
                         modeIdx = (modeIdx + 1) % modes.size
                         api.match.mode = modes[modeIdx]
+                        applyBots()
                     }
                 )
                 Selector(
@@ -89,26 +119,70 @@ fun MatchSetupScreen(api: GameApi, onBack: () -> Unit, onOpen: (String) -> Unit)
                         api.match.arena = arenas[arenaIdx]
                     }
                 )
-                // Bots: only for Deathmatch and Team Deathmatch
-                if (botMode) {
+
+                // Deathmatch: just a bot count
+                if (isDeathmatch) {
                     NfRow("Bots (you + $bots)") {
                         Stepper(
                             "$bots",
                             onMinus = {
                                 if (bots > 1) {
                                     bots -= 1
-                                    MatchSettings.botCount = bots
+                                    applyBots()
                                 }
                             },
                             onPlus = {
                                 if (bots < MatchSettings.MAX_BOTS) {
                                     bots += 1
-                                    MatchSettings.botCount = bots
+                                    applyBots()
                                 }
                             }
                         )
                     }
                 }
+
+                // Team Deathmatch, Capture the Flag and Zombies: how many players on your team
+                if (isTeamMode || isZombies) {
+                    NfRow("Your team (you + ${myTeam - 1})") {
+                        Stepper(
+                            "$myTeam",
+                            onMinus = {
+                                if (myTeam > 1) {
+                                    myTeam -= 1
+                                    applyBots()
+                                }
+                            },
+                            onPlus = {
+                                if (myTeam < MatchConfig.MAX_TEAM) {
+                                    myTeam += 1
+                                    applyBots()
+                                }
+                            }
+                        )
+                    }
+                }
+
+                // Team Deathmatch and Capture the Flag: how many players on the other team
+                if (isTeamMode) {
+                    NfRow("Other team") {
+                        Stepper(
+                            "$otherTeam",
+                            onMinus = {
+                                if (otherTeam > 1) {
+                                    otherTeam -= 1
+                                    applyBots()
+                                }
+                            },
+                            onPlus = {
+                                if (otherTeam < MatchConfig.MAX_TEAM) {
+                                    otherTeam += 1
+                                    applyBots()
+                                }
+                            }
+                        )
+                    }
+                }
+
                 NfPanel(Modifier.fillMaxWidth().weight(1f)) {
                     ArtBlock(
                         Modifier.fillMaxSize(),
@@ -172,7 +246,7 @@ fun MatchSetupScreen(api: GameApi, onBack: () -> Unit, onOpen: (String) -> Unit)
                     primary = true,
                     size = 22
                 ) {
-                    MatchSettings.botCount = bots
+                    applyBots()
                     api.startMatch()
                     onOpen("hud")
                 }
