@@ -57,12 +57,14 @@ import kotlin.random.Random
 //
 // Needs in app/src/main/assets/ : arena_play.glb, arena_play.json, char_blue.glb
 // Optional (gun in hand): mp5_gun.glb, ak47_gun.glb, ar_gun.glb, rifle.glb, carbine.glb
+// Shield files (see Shields.kt): nightfall_shield_blue_hex.glb, nightfall_shield_pink.glb,
+//   nightfall_shield_geo_triangles.glb, nightfall_shield_hex_sphere.glb, shield_storm_spark.glb
 //
 // CHANGES IN THIS VERSION
-//  1) The SHIELD drawing moved to ShieldView.kt (new file). The shield list is in Shields.kt (new file).
-//     Five looks: Classic, Vortex, Prism (triangles), Tech Dome, Storm Spark. The shield you pick in
-//     Weapons > SHIELDS is the one used here (ShieldLoadout.selected).
-//  2) GameInput has one new number: shieldIdx (which shield the HP below belongs to).
+//  1) The SHIELD is now a GLB file. ShieldView.kt loads the file named in Shields.kt for the shield
+//     you picked in Weapons > SHIELDS (ShieldLoadout.selected). The loader is the LaunchedEffect
+//     right under "val nodes = rememberNodes" below.
+//  2) The closing brace at the very end of the file (after quatXYZ) is back.
 // =====================================================================
 
 // ---- Tuning numbers: change these if something looks wrong ----
@@ -453,7 +455,7 @@ internal fun Game3DView(
 
     val botViews = remember { mutableListOf<BotView>() }
 
-    // The shield (all its nodes and colours are built in ShieldView.kt)
+    // The shield (the nodes are made in ShieldView.kt, the GLB is loaded further down)
     val shield = remember { createShieldRig(engine, materialLoader) }
 
     val nodes = rememberNodes {
@@ -464,6 +466,13 @@ internal fun Game3DView(
         add(muzzleFlash)
         addAll(fxNodes)
         addAll(flagNodes)
+    }
+
+    // 0) the shield GLB (the one equipped in Weapons > SHIELDS). Loads again if another shield is chosen.
+    LaunchedEffect(ready, shield.wantIdx) {
+        if (!ready) return@LaunchedEffect
+        withFrameNanos { }
+        loadShieldModel(shield, modelLoader, shield.wantIdx)
     }
 
     // 1) arena, 2) character
