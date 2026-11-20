@@ -256,6 +256,60 @@ internal fun arenaNames(): List<String> = ARENA_DEFS.map { it.name }
 internal val CHAR_FILES = listOf("char_blue.glb", "char_red.glb", "char_aqua.glb", "orange_amor.glb")
 internal val CHAR_NAMES = listOf("Blue", "Red", "Aqua", "Orange")
 
+// ---- Per-character settings (each model has its own skeleton) ----
+// Bone that holds the gun, for each character in CHAR_FILES. Blue / Red / Aqua = 14. Orange = 40 (R_Hand).
+private val CHAR_HAND_JOINT = intArrayOf(14, 14, 14, 40)
+private fun handJoint(ci: Int): Int = CHAR_HAND_JOINT.getOrElse(ci) { RIGHT_HAND_JOINT }
+private val ORANGE = CHAR_FILES.indexOf("orange_amor.glb")
+
+// Gun fit for Orange, made in the Gun Fit Lab (hand bone 40). Add the next guns here the same way.
+private val ORANGE_MP5 = GunDef(
+    name = "MP5",
+    file = "mp5_gun.glb",
+    pos = Position(-0.118f, -0.043f, -0.046f),
+    scale = 0.29f,
+    grip = Position(-0.519f, 0.035f, 0.142f),
+    carry = GunTurn(-20.5f, 21.5f, -180f),
+    aim = mapOf(
+        "shoot" to GunTurn(-22f, 16f, -180f),
+        "walk_shoot" to GunTurn(-61.5f, -27f, -173f),
+        "run_shoot" to GunTurn(-65.5f, -31f, 180f)
+    )
+)
+private val ORANGE_FITS: Map<String, GunDef> = mapOf("MP5" to ORANGE_MP5)
+
+// The gun definition to use for this character. Blue / Red / Aqua use the normal GUNS entry.
+// Orange uses its own fit. A gun without an Orange fit yet borrows the Orange MP5 position + rotations
+// and keeps its own scale and grip (not tuned: fit that gun in the lab and add it to ORANGE_FITS).
+private fun fitFor(def: GunDef, ci: Int): GunDef {
+    if (ci != ORANGE) return def
+    ORANGE_FITS[def.name]?.let { return it }
+    return GunDef(
+        name = def.name, file = def.file, pos = ORANGE_MP5.pos, scale = def.scale, grip = def.grip,
+        carry = ORANGE_MP5.carry, aim = ORANGE_MP5.aim, hasScope = def.hasScope
+    )
+}
+
+// Orange only has the clips run / shoot / walk. The other names the game asks for are borrowed from them.
+// (idle, jump, crouch and punches are placeholders until Orange gets its own animations.)
+private fun clipAlias(ci: Int, want: String): String {
+    if (ci != ORANGE) return want
+    return when (want) {
+        "run", "run_shoot" -> "run"
+        "shoot" -> "shoot"
+        else -> "walk"
+    }
+}
+// idle = the walk clip held on the frame used for the gun fit; shoot = the shoot clip held on its first frame.
+private fun clipForce(ci: Int, want: String, forceTime: Float): Float {
+    if (ci != ORANGE) return forceTime
+    return when (want) {
+        "idle" -> 0.45f
+        "shoot" -> 0f
+        else -> forceTime
+    }
+}
+
 // Plain values the game loop changes every frame (no Compose redraw needed)
 internal class GameInput {
     var x = 0f
@@ -942,7 +996,7 @@ private fun stepGame(
         if (on) {
             m.position = Position(rig.x, rig.y + rig.jumpH, rig.z)
             m.rotation = Rotation(y = rig.faceDeg)
-            driveAnimation(m, rig.anim[i], want, dt, timeScale, forceTime, layerBase)
+            driveAnimation(m, rig.anim[i], clipAlias(i, want), dt, timeScale, clipForce(i, want, forceTime), layerBase)
         }
     }
 
@@ -950,11 +1004,11 @@ private fun stepGame(
     if (rig.gunLoaded && activeModel != null &&
         rig.gunOwner != rig.active && rig.attachFails[rig.active] < 10
     ) {
-        if (attachGun(engine, gun, activeModel)) rig.gunOwner = rig.active
+        if (attachGun(engine, gun, activeModel, handJoint(rig.active))) rig.gunOwner = rig.active
         else rig.attachFails[rig.active]++
     }
     gun.isVisible = rig.gunLoaded && activeModel != null && rig.gunOwner == rig.active && (rig.punchClip.isEmpty() || rig.fitOn) && !rig.handMode && !dead && !rig.scopeOn
-    val def = rig.gunDef
+    val def = fitFor(rig.gunDef, rig.active)
     syncFit(rig, def)
     if (rig.fitOn) {
         val key = rig.fitKey()
@@ -973,7 +1027,7 @@ private fun stepGame(
     }
 
     if (rig.shooting) {
-        if (activeModel != null && rig.gunLoaded && handWorld(engine, activeModel, rig.hand)) {
+        if (activeModel != null && rig.gunLoaded && handWorld(engine, activeModel, rig.hand, handJoint(rig.active))) {
             rig.mx = rig.hand[0] + sx * MUZZLE_FORWARD
             rig.my = rig.hand[1]
             rig.mz = rig.hand[2] + sz * MUZZLE_FORWARD
@@ -1130,7 +1184,7 @@ private fun stepBots(
         driveAnimation(v.model, v.anim, b.anim, dt, 1f, -1f, "")
 
         if (v.gunLoaded && !v.gunAttached && v.fails < 10) {
-            if (attachGun(engine, v.gun, v.model)) v.gunAttached = true else v.fails++
+            if (attachGun(engine, v.gun, v.model, handJoint(0))) v.gunAttached = true else v.fails++   // bots are Blue
         }
         v.gun.isVisible = v.gunLoaded && v.gunAttached
         val turn = gdef.aim[b.anim] ?: gdef.carry
@@ -1405,10 +1459,10 @@ private fun updateFx(dt: Float, rig: GameInput, nodes: List<CubeNode>) {
 
 // ---------------- Gun helpers ----------------
 
-private fun attachGun(engine: Engine, gun: Node, model: ModelNode): Boolean {
+private fun attachGun(engine: Engine, gun: Node, model: ModelNode, joint: Int): Boolean {
     return try {
         val joints = model.modelInstance.getJointsAt(0)
-        val bone = joints[RIGHT_HAND_JOINT]
+        val bone = joints[joint]
         val tm = engine.transformManager
         tm.setParent(tm.getInstance(gun.entity), tm.getInstance(bone))
         true
@@ -1419,10 +1473,10 @@ private fun attachGun(engine: Engine, gun: Node, model: ModelNode): Boolean {
 }
 
 private val handMatrix = FloatArray(16)
-private fun handWorld(engine: Engine, model: ModelNode, out: FloatArray): Boolean {
+private fun handWorld(engine: Engine, model: ModelNode, out: FloatArray, joint: Int): Boolean {
     return try {
         val joints = model.modelInstance.getJointsAt(0)
-        val bone = joints[RIGHT_HAND_JOINT]
+        val bone = joints[joint]
         val tm = engine.transformManager
         tm.getWorldTransform(tm.getInstance(bone), handMatrix)
         out[0] = handMatrix[12]
