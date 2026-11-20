@@ -23,7 +23,6 @@ import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.google.android.filament.Engine
-import com.google.android.filament.MaterialInstance
 import com.google.android.filament.gltfio.Animator
 import com.google.android.filament.IndirectLight
 import com.google.android.filament.Skybox
@@ -34,28 +33,21 @@ import io.github.sceneview.environment.Environment
 import io.github.sceneview.math.Position
 import io.github.sceneview.math.Rotation
 import io.github.sceneview.node.CubeNode
-import io.github.sceneview.node.CylinderNode
 import io.github.sceneview.node.ModelNode
 import io.github.sceneview.node.Node
-import io.github.sceneview.node.SphereNode
 import io.github.sceneview.rememberCameraNode
 import io.github.sceneview.rememberEngine
 import io.github.sceneview.rememberMaterialLoader
 import io.github.sceneview.rememberModelLoader
 import io.github.sceneview.rememberNodes
 import kotlin.math.PI
-import kotlin.math.abs
-import kotlin.math.acos
 import kotlin.math.atan
-import kotlin.math.ceil
-import kotlin.math.exp
 import kotlin.math.atan2
 import kotlin.math.cos
 import kotlin.math.hypot
 import kotlin.math.max
 import kotlin.math.min
 import kotlin.math.sin
-import kotlin.math.sqrt
 import kotlin.random.Random
 
 // =====================================================================
@@ -67,11 +59,10 @@ import kotlin.random.Random
 // Optional (gun in hand): mp5_gun.glb, ak47_gun.glb, ar_gun.glb, rifle.glb, carbine.glb
 //
 // CHANGES IN THIS VERSION
-//  1) SHIELD is now a SOLID energy bubble: a blue glowing translucent ball (so you really look "inside" a shield and
-//     everything behind it is tinted blue), a soft outer glow layer, thick glowing hex lines on the surface, and a
-//     glowing disc on the floor under your feet. A hit flashes the whole ball bright and rolls a ripple over it.
-//  2) FLAGS now have a real cloth banner: 24 thin overlapping strips, each one leaning along the wave, so it reads as
-//     one smooth waving cloth (not 10 separate rectangles).
+//  1) The SHIELD drawing moved to ShieldView.kt (new file). The shield list is in Shields.kt (new file).
+//     Five looks: Classic, Vortex, Prism (triangles), Tech Dome, Storm Spark. The shield you pick in
+//     Weapons > SHIELDS is the one used here (ShieldLoadout.selected).
+//  2) GameInput has one new number: shieldIdx (which shield the HP below belongs to).
 // =====================================================================
 
 // ---- Tuning numbers: change these if something looks wrong ----
@@ -131,22 +122,6 @@ private const val PUNCH_CHAIN_AT = 0.3f
 private const val JUMP_CLIP = "jump_inplace"
 private const val CROUCH_POSE_T = 0.40f
 private const val CROUCH_SPEED = 1.2f
-
-// ---- Shield: solid energy bubble + glowing hex lines ----
-private const val SHIELD_R = 1.1f
-private const val SHIELD_CY = 0.9f
-private const val SHIELD_EDGE_THICK = 0.034f  // thick glowing hex lines (was 0.016)
-private const val SHIELD_FREQ = 3
-private const val SHIELD_MAX_HITS = 25f
-private const val SHIELD_REVIVE_SEC = 20f
-private const val SHIELD_BREAK_TIME = 0.55f
-private const val SHIELD_APPEAR_TIME = 0.45f
-private const val M_SHINE = 5
-private const val M_HOT = 6
-private const val M_AMBER = 7
-private const val SHIELD_HIT_TIME = 0.7f
-private const val RIPPLE_RING = 16
-private const val RIPPLE_COUNT = RIPPLE_RING + 1
 private const val JUMP_LEN = 0.5f
 private const val JUMP_TAKEOFF_T = 0.1406f
 private const val JUMP_LAND_T = 0.3594f
@@ -276,6 +251,7 @@ internal class GameInput {
     var crouch = false
     var shieldOn by mutableStateOf(false)
     var shieldHp = SHIELD_MAX_HITS
+    var shieldIdx = -1                 // which shield (index in SHIELDS) the shieldHp belongs to
     var shieldCd = 0f
     var shieldCdSec by mutableIntStateOf(0)
     var shieldBreakT = 0f
@@ -378,105 +354,6 @@ internal class BotView(
     var fails = 0
 }
 
-// ---------------- Shield shape: Goldberg sphere (hexagon cells + 12 pentagons) ----------------
-private class ShieldGeo(
-    val count: Int,
-    val mid: FloatArray,
-    val dir: FloatArray,
-    val quat: Array<Quaternion>,
-    val lens: FloatArray,
-    val band: IntArray
-)
-
-private val SHIELD_GEO: ShieldGeo by lazy { buildShieldGeo() }
-
-private fun buildShieldGeo(): ShieldGeo {
-    val phi = (1f + sqrt(5f)) / 2f
-    val bv = arrayOf(
-        floatArrayOf(-1f, phi, 0f), floatArrayOf(1f, phi, 0f), floatArrayOf(-1f, -phi, 0f), floatArrayOf(1f, -phi, 0f),
-        floatArrayOf(0f, -1f, phi), floatArrayOf(0f, 1f, phi), floatArrayOf(0f, -1f, -phi), floatArrayOf(0f, 1f, -phi),
-        floatArrayOf(phi, 0f, -1f), floatArrayOf(phi, 0f, 1f), floatArrayOf(-phi, 0f, -1f), floatArrayOf(-phi, 0f, 1f)
-    )
-    val bf = arrayOf(
-        intArrayOf(0, 11, 5), intArrayOf(0, 5, 1), intArrayOf(0, 1, 7), intArrayOf(0, 7, 10), intArrayOf(0, 10, 11),
-        intArrayOf(1, 5, 9), intArrayOf(5, 11, 4), intArrayOf(11, 10, 2), intArrayOf(10, 7, 6), intArrayOf(7, 1, 8),
-        intArrayOf(3, 9, 4), intArrayOf(3, 4, 2), intArrayOf(3, 2, 6), intArrayOf(3, 6, 8), intArrayOf(3, 8, 9),
-        intArrayOf(4, 9, 5), intArrayOf(2, 4, 11), intArrayOf(6, 2, 10), intArrayOf(8, 6, 7), intArrayOf(9, 8, 1)
-    )
-    val n = SHIELD_FREQ
-    val verts = ArrayList<FloatArray>()
-    val index = HashMap<String, Int>()
-    fun vert(x: Float, y: Float, z: Float): Int {
-        val l = sqrt(x * x + y * y + z * z)
-        val nx = x / l; val ny = y / l; val nz = z / l
-        val key = "${(nx * 10000).toInt()},${(ny * 10000).toInt()},${(nz * 10000).toInt()}"
-        return index.getOrPut(key) { verts.add(floatArrayOf(nx, ny, nz)); verts.size - 1 }
-    }
-    val tris = ArrayList<IntArray>()
-    for (f in bf) {
-        val a = bv[f[0]]; val b = bv[f[1]]; val c = bv[f[2]]
-        fun p(i: Int, j: Int): Int {
-            val wa = (n - i - j).toFloat(); val wb = i.toFloat(); val wc = j.toFloat()
-            return vert(
-                (a[0] * wa + b[0] * wb + c[0] * wc) / n,
-                (a[1] * wa + b[1] * wb + c[1] * wc) / n,
-                (a[2] * wa + b[2] * wb + c[2] * wc) / n
-            )
-        }
-        for (i in 0 until n) for (j in 0 until n - i) {
-            tris.add(intArrayOf(p(i, j), p(i + 1, j), p(i, j + 1)))
-            if (j < n - i - 1) tris.add(intArrayOf(p(i + 1, j), p(i + 1, j + 1), p(i, j + 1)))
-        }
-    }
-    val cen = tris.map { t ->
-        val a = verts[t[0]]; val b = verts[t[1]]; val c = verts[t[2]]
-        val x = a[0] + b[0] + c[0]; val y = a[1] + b[1] + c[1]; val z = a[2] + b[2] + c[2]
-        val l = sqrt(x * x + y * y + z * z)
-        floatArrayOf(x / l, y / l, z / l)
-    }
-    val edgeFaces = HashMap<Long, IntArray>()
-    for ((fi, t) in tris.withIndex()) for (e in 0..2) {
-        val a = t[e]; val b = t[(e + 1) % 3]
-        val key = min(a, b).toLong() * 100000L + max(a, b).toLong()
-        val old = edgeFaces[key]
-        if (old == null) edgeFaces[key] = intArrayOf(fi, -1) else old[1] = fi
-    }
-    val mids = ArrayList<Float>(); val dirs = ArrayList<Float>(); val lens = ArrayList<Float>()
-    val quats = ArrayList<Quaternion>(); val bands = ArrayList<Int>()
-    for (pair in edgeFaces.values) {
-        if (pair[1] < 0) continue
-        val a = cen[pair[0]]; val b = cen[pair[1]]
-        val dx = b[0] - a[0]; val dy = b[1] - a[1]; val dz = b[2] - a[2]
-        val d = sqrt(dx * dx + dy * dy + dz * dz)
-        val mx = (a[0] + b[0]) / 2f; val my = (a[1] + b[1]) / 2f; val mz = (a[2] + b[2]) / 2f
-        val ml = sqrt(mx * mx + my * my + mz * mz)
-        mids.add(mx * SHIELD_R); mids.add(my * SHIELD_R); mids.add(mz * SHIELD_R)
-        dirs.add(mx / ml); dirs.add(my / ml); dirs.add(mz / ml)
-        lens.add(d * SHIELD_R * 1.1f)
-        quats.add(quatFromZ(dx / d, dy / d, dz / d))
-        bands.add((((my / ml) + 1f) / 2f * 5f).toInt().coerceIn(0, 4))
-    }
-    return ShieldGeo(quats.size, mids.toFloatArray(), dirs.toFloatArray(), quats.toTypedArray(), lens.toFloatArray(), bands.toIntArray())
-}
-
-// Colours + which colour each line has right now
-private object ShieldFx {
-    var mats: List<MaterialInstance> = emptyList()
-    var cur = IntArray(0)
-    var fillMats: List<MaterialInstance> = emptyList()   // 0 = blue body, 1 = hit flash, 2 = amber (weak)
-    var fillCur = -1
-}
-
-private fun quatFromZ(dx: Float, dy: Float, dz: Float): Quaternion {
-    if (dz > 0.9999f) return Quaternion(0f, 0f, 0f, 1f)
-    if (dz < -0.9999f) return Quaternion(1f, 0f, 0f, 0f)
-    val w = 1f + dz
-    val x = -dy
-    val y = dx
-    val n = sqrt(x * x + y * y + w * w)
-    return Quaternion(x / n, y / n, 0f, w / n)
-}
-
 internal fun characterNames(): List<String> = CHAR_NAMES
 internal fun gunNames(): List<String> = GUNS.map { it.name }
 
@@ -576,54 +453,14 @@ internal fun Game3DView(
 
     val botViews = remember { mutableListOf<BotView>() }
 
-    // Shield hex lines (thick, glowing)
-    val shieldNodes = remember {
-        val geo = SHIELD_GEO
-        // 0..4 = blue -> aqua gradient (bottom to top), 5 = shine, 6 = hit glow, 7 = amber (shield is weak)
-        val colours = listOf(0xFF2A7BFFL, 0xFF2FB0FFL, 0xFF3FD2FFL, 0xFF7FE8FFL, 0xFFB8F6FFL, 0xFFE8FDFFL, 0xFFFFFFFFL, 0xFFFFB347L)
-        val mats = colours.map { materialLoader.createColorInstance(Color(it)) }
-        ShieldFx.mats = mats
-        ShieldFx.cur = IntArray(geo.count) { geo.band[it] }
-        List(geo.count) { i ->
-            CubeNode(engine, size = Float3(SHIELD_EDGE_THICK, SHIELD_EDGE_THICK, 1f), materialInstance = mats[geo.band[i]])
-                .apply {
-                    quaternion = geo.quat[i]
-                    isVisible = false
-                }
-        }
-    }
-
-    // Shield body: 0 = translucent blue ball, 1 = soft outer glow ball, 2 = glowing floor disc
-    // If the ball looks solid (not see-through) in your SceneView version, lower the alpha values below.
-    val shieldFill = remember {
-        val body = materialLoader.createColorInstance(Color(0xFF1E78FF).copy(alpha = 0.30f))
-        val flash = materialLoader.createColorInstance(Color(0xFF9FF2FF).copy(alpha = 0.55f))
-        val amber = materialLoader.createColorInstance(Color(0xFFFFA030).copy(alpha = 0.32f))
-        val glow = materialLoader.createColorInstance(Color(0xFF4FD8FF).copy(alpha = 0.14f))
-        val disc = materialLoader.createColorInstance(Color(0xFF35C8FF).copy(alpha = 0.40f))
-        ShieldFx.fillMats = listOf(body, flash, amber)
-        ShieldFx.fillCur = 0
-        listOf<Node>(
-            SphereNode(engine, radius = 1f, materialInstance = body).apply { isVisible = false },
-            SphereNode(engine, radius = 1f, materialInstance = glow).apply { isVisible = false },
-            CylinderNode(engine, radius = SHIELD_R, height = 0.02f, materialInstance = disc).apply { isVisible = false }
-        )
-    }
-
-    val rippleNodes = remember {
-        val mat = materialLoader.createColorInstance(Color(0xFFEFFFFF))
-        List(RIPPLE_COUNT) {
-            CubeNode(engine, size = Float3(0.07f, 0.07f, 0.07f), materialInstance = mat).apply { isVisible = false }
-        }
-    }
+    // The shield (all its nodes and colours are built in ShieldView.kt)
+    val shield = remember { createShieldRig(engine, materialLoader) }
 
     val nodes = rememberNodes {
         add(gun)
         addAll(bullets)
         addAll(botBullets)
-        addAll(shieldFill)
-        addAll(shieldNodes)
-        addAll(rippleNodes)
+        addAll(shield.all())
         add(muzzleFlash)
         addAll(fxNodes)
         addAll(flagNodes)
@@ -759,7 +596,7 @@ internal fun Game3DView(
             childNodes = nodes,
             environment = environment,
             onFrame = { nanos ->
-                stepGame(nanos, rig, models, cameraNode, engine, gun, bullets, shieldNodes, shieldFill, rippleNodes, botViews, botBullets, muzzleFlash, fxNodes, flagNodes)
+                stepGame(nanos, rig, models, cameraNode, engine, gun, bullets, shield, botViews, botBullets, muzzleFlash, fxNodes, flagNodes)
             }
         )
 
@@ -843,9 +680,7 @@ private fun stepGame(
     engine: Engine,
     gun: Node,
     bullets: List<CubeNode>,
-    shieldNodes: List<CubeNode>,
-    shieldFill: List<Node>,
-    rippleNodes: List<CubeNode>,
+    shield: ShieldRig,
     botViews: List<BotView>,
     botBullets: List<CubeNode>,
     muzzleFlash: CubeNode,
@@ -1087,7 +922,7 @@ private fun stepGame(
         mt.hitFx.clear()
         if (mt.over) rig.paused = true
     }
-    updateShield(rig, shieldNodes, shieldFill, rippleNodes, nanos, dt)
+    updateShield(rig, shield, nanos, dt)
     updateFx(dt, rig, fxNodes)
     updateFlags(mt, flagNodes, nanos)
 
@@ -1271,143 +1106,6 @@ private fun driveAnimation(
         animator.applyCrossFade(st.prev, st.prevTime, if (BLEND_FLIP) 1f - st.fade else st.fade)
     }
     animator.updateBoneMatrices()
-}
-
-// ---------------- Shield ----------------
-
-// Solid blue energy bubble (translucent body + outer glow + floor disc) with thick glowing hex lines on top.
-// Hit: whole body flashes, ring ripples over the lines. After SHIELD_MAX_HITS it shatters, then grows back.
-private fun updateShield(rig: GameInput, nodes: List<CubeNode>, fill: List<Node>, ripple: List<CubeNode>, nanos: Long, dt: Float) {
-    for (n in ripple) if (n.isVisible) n.isVisible = false
-    val dead = rig.match?.playerDead == true
-
-    if (rig.shieldCd > 0f) {
-        rig.shieldCd = max(0f, rig.shieldCd - dt)
-        if (rig.shieldCd <= 0f) {
-            rig.shieldHp = SHIELD_MAX_HITS
-            rig.shieldCdSec = 0
-            rig.shieldOn = true
-            rig.shieldAppearT = SHIELD_APPEAR_TIME
-        } else {
-            rig.shieldOn = false
-            val sec = ceil(rig.shieldCd).toInt()
-            if (sec != rig.shieldCdSec) rig.shieldCdSec = sec
-        }
-    }
-    if (rig.shieldBreakT > 0f) rig.shieldBreakT = max(0f, rig.shieldBreakT - dt)
-
-    if (rig.shieldOn && rig.shieldHitT >= SHIELD_HIT_TIME - 0.001f) {
-        rig.shieldHp -= 1f
-        if (rig.shieldHp <= 0f) {
-            rig.shieldOn = false
-            rig.shieldCd = SHIELD_REVIVE_SEC
-            rig.shieldCdSec = SHIELD_REVIVE_SEC.toInt()
-            rig.shieldBreakT = SHIELD_BREAK_TIME
-        }
-    }
-
-    val breaking = rig.shieldBreakT > 0f
-    if (dead || (!rig.shieldOn && !breaking)) {
-        for (n in nodes) if (n.isVisible) n.isVisible = false
-        for (n in fill) if (n.isVisible) n.isVisible = false
-        rig.shieldHitT = 0f
-        rig.shieldWasOn = false
-        return
-    }
-    if (rig.shieldOn && !rig.shieldWasOn && rig.shieldAppearT <= 0f) rig.shieldAppearT = SHIELD_APPEAR_TIME
-    rig.shieldWasOn = rig.shieldOn
-
-    val g = SHIELD_GEO
-    val fx = ShieldFx
-    val t = nanos / 1_000_000_000f
-    val cx = rig.x
-    val cy = rig.y + rig.jumpH + SHIELD_CY
-    val cz = rig.z
-
-    if (rig.shieldHitT > 0f) rig.shieldHitT = max(0f, rig.shieldHitT - dt)
-    if (rig.shieldAppearT > 0f) rig.shieldAppearT = max(0f, rig.shieldAppearT - dt)
-    val fade = rig.shieldHitT / SHIELD_HIT_TIME
-    val hit = fade > 0f && !breaking
-    val hx = rig.shieldDx
-    val hy = rig.shieldDy
-    val hz = rig.shieldDz
-    val front = (1f - fade) * 2.6f
-    val ap = 1f - rig.shieldAppearT / SHIELD_APPEAR_TIME
-    val ease = ap * ap * (3f - 2f * ap)
-    val bp = if (breaking) 1f - rig.shieldBreakT / SHIELD_BREAK_TIME else 0f
-    val low = rig.shieldHp <= SHIELD_MAX_HITS * 0.3f
-    val scanY = ((t * (if (low) 0.8f else 0.45f)) % 2.6f) - 1.3f
-    val breathe = 1f + 0.015f * sin(t * 2.2f)
-
-    // --- solid body: translucent ball, soft outer glow, floor disc ---
-    val grow = if (ease < 1f) 0.5f + 0.5f * ease else 1f
-    val bodyR = SHIELD_R * 0.97f * breathe * grow
-    val body = fill[0]
-    val glow = fill[1]
-    val disc = fill[2]
-    if (breaking) {
-        body.isVisible = false
-        glow.isVisible = false
-        disc.isVisible = false
-    } else {
-        val want = if (hit && fade > 0.55f) 1 else if (low) 2 else 0
-        if (fx.fillCur != want && fx.fillMats.size == 3) {
-            fx.fillCur = want
-            (body as? SphereNode)?.materialInstance = fx.fillMats[want]
-        }
-        body.position = Position(cx, cy, cz)
-        body.scale = Float3(bodyR, bodyR, bodyR)
-        val glowR = bodyR * (1.06f + 0.015f * sin(t * 3f))
-        glow.position = Position(cx, cy, cz)
-        glow.scale = Float3(glowR, glowR, glowR)
-        val dr = grow * (1f + 0.03f * sin(t * 2.6f))
-        disc.position = Position(cx, rig.y + 0.03f, cz)
-        disc.scale = Float3(dr, 1f, dr)
-        body.isVisible = true
-        glow.isVisible = true
-        disc.isVisible = rig.jumpH < 0.3f
-    }
-
-    // --- hex lines ---
-    for (i in nodes.indices) {
-        val n = nodes[i]
-        val ux = g.dir[i * 3]
-        val uy = g.dir[i * 3 + 1]
-        val uz = g.dir[i * 3 + 2]
-        var k = breathe + 0.012f * sin(t * 1.7f + (ux * 3.1f + uy * 4.3f + uz * 2.3f) * 3f)
-        var thick = 1f
-        var m = g.band[i]
-        if (abs(uy - scanY) < 0.15f) m = if (low) M_AMBER else M_SHINE
-
-        if (hit) {
-            val ang = acos((ux * hx + uy * hy + uz * hz).coerceIn(-1f, 1f))
-            val rel = front - ang
-            if (rel > 0f) k += 0.10f * fade * exp(-rel * 2.2f) * sin(rel * 14f)
-            if (ang < 0.45f) k -= 0.05f * fade * (1f - ang / 0.45f)
-            val q = rel / 0.22f
-            val ring = exp(-q * q)
-            if (ring > 0.35f) { m = M_HOT; thick = 1f + 1.6f * ring * fade }
-            else if (ring > 0.12f) { m = M_SHINE; thick = 1f + 0.6f * ring * fade }
-        }
-        if (ease < 1f) {
-            k *= 0.5f + 0.5f * ease
-            thick *= ease
-            if (ease < 0.8f) m = M_SHINE
-        }
-        if (breaking) {
-            k *= 1f + 1.8f * bp
-            thick *= (1f - bp)
-            m = M_HOT
-        }
-        thick = max(thick, 0.001f)
-        n.position = Position(cx + g.mid[i * 3] * k, cy + g.mid[i * 3 + 1] * k, cz + g.mid[i * 3 + 2] * k)
-        n.scale = Float3(thick, thick, g.lens[i] * k)
-        if (fx.cur[i] != m) {
-            fx.cur[i] = m
-            n.materialInstance = fx.mats[m]
-        }
-        if (!n.isVisible) n.isVisible = true
-    }
 }
 
 // ---------------- Bullets ----------------
