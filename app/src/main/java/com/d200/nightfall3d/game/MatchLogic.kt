@@ -40,14 +40,15 @@ import kotlin.random.Random
 //
 // CHANGES IN THIS VERSION
 //  1) SHIELD NOW REALLY PROTECTS YOUR HP: while the shield is on, bullets do no damage to your HP at all
-//     (SHIELD_KEEP = 0). Before, you still took 30% of every bullet, and at least 1 HP per bullet, so the shield
-//     felt like it did nothing. The shield itself is used up by the hits (see SHIELD_MAX_HITS in Game3DView.kt),
+//     (SHIELD_KEEP = 0). The shield itself is used up by the hits (see maxHits in Shields.kt),
 //     and when it breaks your HP is exposed again until it grows back.
 //     If you want a leak, set SHIELD_KEEP to 0.1 (you take 10% of the damage).
 //  2) MatchSettings.blueBots / redBots: the Match Setup screen chooses how many bots are on each team
 //     (Team Deathmatch and Capture the Flag). MAX_BOTS is now 8 in total.
 //  3) When a bullet hits you while your shield is on, the hit is sent to the shield effect (rig.shieldHitT + direction)
 //     and makes sparks instead of blood.
+//  4) SHIELD DAMAGE AURA (shieldAura below): some shields (Vortex, Prism Barrier, Storm Spark) hurt enemies that
+//     stand close to you while the shield is on. The numbers (auraDps, auraR) are in Shields.kt.
 // =====================================================================
 
 object MatchSettings {
@@ -71,8 +72,8 @@ private const val BOT_BULLET_DMG = 9          // bot bullet damage (low, so the 
 private const val PUNCH_DMG = 40
 private const val PUNCH_RANGE = 1.4f
 private const val SHIELD_KEEP = 0f            // with the shield on you take this part of the damage (0 = none, 0.3 = 30%)
-private const val SHIELD_CENTER_Y = 0.9f      // same as SHIELD_CY in Game3DView.kt
-private const val SHIELD_HIT_SEC = 0.7f       // same as SHIELD_HIT_TIME in Game3DView.kt
+private const val SHIELD_CENTER_Y = 0.9f      // same as SHIELD_CY in ShieldView.kt
+private const val SHIELD_HIT_SEC = 0.7f       // same as SHIELD_HIT_TIME in ShieldView.kt
 private const val RESPAWN_SECONDS = 3f
 private const val KILL_LIMIT_DM = 10          // first to this many kills wins (Deathmatch)
 private const val KILL_LIMIT_TDM = 25         // first team to this many kills wins (Team Deathmatch)
@@ -235,6 +236,7 @@ internal class MatchState(
     private var playerRespawnT = 0f
     private var spawned = false
     private var punchDone = false
+    private val auraAcc = FloatArray(bots.size)     // damage from the shield aura, collected until it is a whole HP
 
     fun myKills(): Int = if (board >= 0) kills[0] else 0
 
@@ -298,6 +300,7 @@ internal class MatchState(
         }
 
         for (b in bots) updateBot(b, dt, rig, play)
+        shieldAura(dt, rig)
         updateBotBullets(dt, rig, play)
         if (ctf) updateCtf(dt, rig)
         refreshCounts()
@@ -506,6 +509,28 @@ internal class MatchState(
             b.speed = 0f
             if (ctf) dropFlagAt(b.id, b.x, b.y, b.z)
             registerKill(b.id, attacker)
+        }
+    }
+
+    // Shield aura: while your shield is on, enemies closer than auraR lose auraDps HP per second.
+    // The damage is collected in auraAcc and applied in whole HP, and counts as your kill.
+    private fun shieldAura(dt: Float, rig: GameInput) {
+        if (!rig.shieldOn || playerDead || over) return
+        val def = ShieldLoadout.current()
+        if (def.auraDps <= 0f) return
+        for (b in bots) {
+            if (!b.alive) continue
+            if (teamMode && b.team == 0) continue
+            val d = hypot(b.x - rig.x, b.z - rig.z)
+            if (d > def.auraR) continue
+            val i = b.id - 1
+            auraAcc[i] += def.auraDps * dt
+            val whole = auraAcc[i].toInt()
+            if (whole >= 1) {
+                auraAcc[i] -= whole.toFloat()
+                addHit(b.x, b.y + 1.2f, b.z, 0)       // sparks on him
+                damageBot(b, whole, 0)
+            }
         }
     }
 
