@@ -17,7 +17,7 @@ import kotlin.math.sin
 import kotlin.random.Random
 
 // =====================================================================
-// MatchLogic.kt  -  Deathmatch + Team Deathmatch + Capture the Flag (offline test, bots).
+// MatchLogic.kt  -  Deathmatch + Team Deathmatch + Capture the Flag + King of the Hill (offline test, bots).
 // No drawing in here. Game3DView.kt draws the bots (copies of the blue GLB) and the flags from the numbers in this file.
 //
 //   fighter id 0   = you
@@ -26,6 +26,12 @@ import kotlin.random.Random
 //   Team Deathmatch : you + the BLUE bots = team 0 (allies), the RED bots = team 1 (enemies)
 //                     bullets pass through allies (no friendly fire)
 //   Capture the Flag: same two teams as Team Deathmatch. Team 0 base = the blue pad, team 1 base = the red pad.
+//   King of the Hill: everybody against everybody, counted in POINTS. The rules are in KingOfHill.kt (class Hill).
+//
+// CHANGES IN THIS VERSION
+//  KING OF THE HILL: MatchState has koth + hill. The hill rules and drawing are in KingOfHill.kt. Here only
+//     small hooks were added: hill.update() every frame, the bots walk into the zone and hold it,
+//     the score table shows points, and the match ends on points (not kills).
 //
 // CAPTURE THE FLAG RULES
 //   - Each team has one flag at its base. Touch the ENEMY flag to pick it up. Carry it to YOUR base to score.
@@ -38,7 +44,7 @@ import kotlin.random.Random
 //   - Bots: half of each team attack (go for the flag), the other half defend (guard the base). They use a grid
 //     path finder (NavGrid, at the bottom of this file) so they can walk around the walls.
 //
-// CHANGES IN THIS VERSION
+// (older changes)
 //  GRENADE + GAS: blast() hurts the enemies around a grenade explosion (walls block it) and gasHurt() hurts the enemies
 //     standing in a gas cloud. They are called from Throwables.kt. Nothing else in this file changed.
 //  0) BOT BULLETS are drawn by Game3DView.kt with bullet_bot.glb (WeaponSpecs.BOT_BULLET_GLB). BOT_BULLET_COUNT is now 32
@@ -48,7 +54,6 @@ import kotlin.random.Random
 //     above HEAD_Y (1.45 m over the feet) is a headshot (x headshotMultiplier). The old PLAYER_BULLET_DMG is only used
 //     if no spec is given. Bot bullets are unchanged (BOT_BULLET_DMG).
 //     The damage numbers in WeaponSpecs.kt are out of 100 because bots have BOT_MAX_HP = 100.
-// (older)
 //  - SHIELD NOW REALLY PROTECTS YOUR HP: while the shield is on, bullets do no damage to your HP at all
 //     (SHIELD_KEEP = 0). The shield itself is used up by the hits (see maxHits in Shields.kt),
 //     and when it breaks your HP is exposed again until it grows back.
@@ -168,6 +173,8 @@ internal class MatchState(
 ) {
     val ctf = mode == GameMode.CAPTURE_FLAG
     val teamMode = mode == GameMode.TEAM_DEATHMATCH || ctf
+    val koth = mode == GameMode.KING_OF_HILL
+    val hill: Hill? = if (koth) Hill() else null
     val bots: List<Bot>
 
     init {
@@ -211,7 +218,7 @@ internal class MatchState(
     var ownFlag by mutableIntStateOf(F_HOME)       // state of YOUR flag (F_HOME / F_CARRIED / F_DROPPED)
     var enemyFlag by mutableIntStateOf(F_HOME)     // state of the ENEMY flag
     var youCarry by mutableStateOf(false)          // you are carrying the enemy flag
-    var objText by mutableStateOf("")              // "GET THE ENEMY FLAG  34 m"
+    var objText by mutableStateOf("")              // "GET THE ENEMY FLAG  34 m"  /  "HOLD THE ZONE  9 s"
 
     val kills = IntArray(bots.size + 1)
     val deaths = IntArray(bots.size + 1)
@@ -256,7 +263,13 @@ internal class MatchState(
         if (board < 0) return emptyList()
         val list = ArrayList<ScoreRow>()
         for (id in 0..bots.size) {
-            list.add(ScoreRow(if (id == 0) "YOU" else "BOT $id", kills[id], deaths[id], teamOf(id), id == 0))
+            list.add(
+                ScoreRow(
+                    if (id == 0) "YOU" else "BOT $id",
+                    if (koth) (hill?.points?.getOrElse(id) { 0 } ?: 0) else kills[id],   // King of the Hill: points
+                    deaths[id], teamOf(id), id == 0
+                )
+            )
         }
         return list.sortedByDescending { it.kills }
     }
@@ -265,7 +278,7 @@ internal class MatchState(
         if (hitFx.size < 40) hitFx.add(floatArrayOf(x, y, z, kind.toFloat()))
     }
 
-    private fun say(text: String) {
+    internal fun say(text: String) {
         feed = text
         feedT = 3.5f
     }
@@ -291,6 +304,7 @@ internal class MatchState(
         if (!spawned) {
             spawned = true
             if (ctf) initCtf(play)
+            if (koth) { nav = NavGrid(play); hill?.init(play, this) }
             for (b in bots) spawnBot(b, rig, play)
         }
 
@@ -313,6 +327,7 @@ internal class MatchState(
 
         for (b in bots) updateBot(b, dt, rig, play)
         shieldAura(dt, rig)
+        hill?.update(dt, this, rig, play)
         updateBotBullets(dt, rig, play)
         if (ctf) updateCtf(dt, rig)
         refreshCounts()
@@ -613,12 +628,12 @@ internal class MatchState(
         } else if (teamMode) {
             if (teamA >= KILL_LIMIT_TDM) finish("YOUR TEAM WINS")
             else if (teamB >= KILL_LIMIT_TDM) finish("ENEMY TEAM WINS")
-        } else if (attacker >= 0 && kills[attacker] >= KILL_LIMIT_DM) {
+        } else if (!koth && attacker >= 0 && kills[attacker] >= KILL_LIMIT_DM) {
             finish(if (attacker == 0) "YOU WIN" else "${nameOf(attacker)} WINS")
         }
     }
 
-    private fun finish(text: String) {
+    internal fun finish(text: String) {
         if (!over) {
             over = true
             resultText = text
@@ -626,6 +641,7 @@ internal class MatchState(
     }
 
     private fun endByTime() {
+        if (koth) { hill?.endByTime(this); return }
         if (teamMode) {
             finish(if (teamA > teamB) "YOUR TEAM WINS" else if (teamB > teamA) "ENEMY TEAM WINS" else "DRAW")
         } else {
@@ -976,6 +992,24 @@ internal class MatchState(
             }
         }
 
+        // ---- King of the Hill: bots walk into the zone and hold it, unless an enemy is close and in sight ----
+        val hl = hill
+        if (koth && hl != null && hl.ready) {
+            val fighting = haveTarget && b.hasLos && dist < 10f
+            if (!fighting) {
+                if (hypot(hl.x - b.x, hl.z - b.z) < HILL_RADIUS * 0.5f) {
+                    wantX = 0f
+                    wantZ = 0f                      // standing in the zone: hold it
+                } else {
+                    val dir = navDir(b, hl.x, hl.z, dt)
+                    wantX = dir[0]
+                    wantZ = dir[1]
+                    wantSpeed = BOT_RUN
+                    objective = true
+                }
+            }
+        }
+
         if (b.escapeT > 0f) {                                           // stuck on a wall: go another way
             b.escapeT -= dt
             wantX = b.escX; wantZ = b.escZ; wantSpeed = BOT_RUN * 0.8f
@@ -1117,7 +1151,7 @@ internal class MatchState(
 }
 
 // =====================================================================
-// NavGrid: a simple path finder for the bots (used in Capture the Flag).
+// NavGrid: a simple path finder for the bots (used in Capture the Flag and King of the Hill).
 // The arena is cut into 1 m squares. A square is "free" when a person can stand in the middle of it
 // (the same wall rules as tryMove). path() finds the shortest way between two spots with A*.
 // Built once when the match starts.
