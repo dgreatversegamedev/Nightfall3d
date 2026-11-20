@@ -30,6 +30,7 @@ import dev.romainguy.kotlin.math.Float3
 import dev.romainguy.kotlin.math.Quaternion
 import io.github.sceneview.Scene
 import io.github.sceneview.environment.Environment
+import io.github.sceneview.loaders.ModelLoader
 import io.github.sceneview.math.Position
 import io.github.sceneview.math.Rotation
 import io.github.sceneview.node.CubeNode
@@ -60,11 +61,25 @@ import kotlin.random.Random
 // Shield files (see Shields.kt): nightfall_shield_blue_hex.glb, nightfall_shield_pink.glb,
 //   nightfall_shield_geo_triangles.glb, nightfall_shield_hex_sphere.glb, shield_storm_spark.glb
 //
-// CHANGES IN THIS VERSION
-//  1) The SHIELD is now a GLB file. ShieldView.kt loads the file named in Shields.kt for the shield
-//     you picked in Weapons > SHIELDS (ShieldLoadout.selected). The loader is the LaunchedEffect
-//     right under "val nodes = rememberNodes" below.
-//  2) The closing brace at the very end of the file (after quatXYZ) is back.
+// CHANGES IN THIS VERSION (GLB FIRE)
+//  A) BULLETS AND MUZZLE FIRE ARE NOW GLB FILES (put them in app/src/main/assets/). The names come from WeaponSpecs.kt:
+//     bullet_rifle / bullet_smg / bullet_sniper / bullet_pistol / bullet_shotgun_pellet .glb  (your bullets)
+//     bullet_bot.glb (every bot bullet, its own colour)
+//     flash_rifle / flash_sniper / flash_pistol / flash_shotgun .glb  (muzzle fire)
+//     Models are made once when the match starts (FxPool) and re-used. If a file is missing, a plain orange/red box
+//     (bullet) or yellow box (flash) is used instead and a small note shows on screen, so the game never breaks.
+//     The GLBs are expected to point along +Z (forward), like the FX lab. If one shoots sideways, fix it in the lab.
+//  B) JOYSTICK FIRE: single-shot guns (sniper, pistol, shotgun) no longer need a new tap. Hold the aim stick and they
+//     shoot, pause (the gun's cooldown), shoot again. The pause is 1 / shotsPerSecond in WeaponSpecs.kt.
+//  1) YOUR BULLETS NOW FOLLOW WeaponSpecs.kt. Speed, range, fire rate, spread and damage come from the spec of the
+//     gun in your hand (WeaponSpecs.forGun(name)). The old BULLET_SPEED, BULLET_RANGE and FIRE_INTERVAL numbers
+//     are gone: change a gun in WeaponSpecs.kt instead.
+//  2) SINGLE-SHOT GUNS (the sniper "Rifle"): one bullet, then a pause (the gun's cooldown), then the next while the stick is held.
+//  3) Each bullet remembers the spec it was shot with, so changing gun while a bullet is flying does not change it.
+//     MatchLogic.bulletStep gets the spec and the distance flown, so damage drops with distance and headshots hurt more.
+//  4) The muzzle flash is bigger or smaller by the gun's flashScale.
+// (older) The SHIELD is a GLB file: ShieldView.kt loads the file named in Shields.kt for the shield you picked in
+//     Weapons > SHIELDS (ShieldLoadout.selected). The loader is the LaunchedEffect under "val nodes = rememberNodes".
 // =====================================================================
 
 // ---- Tuning numbers: change these if something looks wrong ----
@@ -95,11 +110,8 @@ private const val DEG_TO_RAD = PI.toFloat() / 180f
 private const val SCOPE_DIST = 0.35f
 private const val SCOPE_DRAG = 0.4f
 
-// ---- Bullets ----
+// ---- Bullets (speed, range, fire rate and damage are in WeaponSpecs.kt) ----
 private const val BULLET_COUNT = 24
-private const val BULLET_SPEED = 40f
-private const val BULLET_RANGE = 50f
-private const val FIRE_INTERVAL = 0.12f
 private const val MUZZLE_FORWARD = 0.5f
 private const val AIM_POINT_DIST = 12f
 private const val BULLET_THICK = 0.03f
@@ -271,6 +283,10 @@ internal class GameInput {
     var gunChild: Node? = null
     val attachFails = IntArray(3)
     var fireTimer = 0f
+    var cooldown = 0f                  // seconds until the gun can shoot again (WeaponSpec.shotIntervalSeconds)
+    val bPool = arrayOfNulls<FxPool>(BULLET_COUNT)       // which GLB pool each flying bullet's model came from
+    val bSlot = IntArray(BULLET_COUNT)                    // and which model in that pool
+    val bSpec = arrayOfNulls<WeaponSpec>(BULLET_COUNT)   // the spec each flying bullet was shot with
     var mx = 0f
     var my = 0f
     var mz = 0f
@@ -343,6 +359,16 @@ internal class AnimState {
     var prevClamp = false
 }
 
+// A set of GLB models of one file, made once and re-used (a bullet takes one, gives it back when it disappears).
+internal class FxPool(val file: String, val nodes: List<Node>, val usedFallback: Boolean) {
+    private val busy = BooleanArray(nodes.size)
+    fun acquire(): Int {
+        for (k in busy.indices) if (!busy[k]) { busy[k] = true; return k }
+        return -1
+    }
+    fun release(k: Int) { if (k in busy.indices) busy[k] = false }
+}
+
 internal class BotView(
     val model: ModelNode,
     val gun: Node,
@@ -378,6 +404,7 @@ internal fun Game3DView(
     var ready by remember { mutableStateOf(false) }
     var status by remember { mutableStateOf("Loading arena...") }
     var note by remember { mutableStateOf("") }
+    var fxNote by remember { mutableStateOf("") }
 
     val environment = remember(engine) {
         Environment(
@@ -393,26 +420,10 @@ internal fun Game3DView(
     val gun = remember { Node(engine).apply { isVisible = false } }
     var gunModel by remember { mutableStateOf<ModelNode?>(null) }
 
-    val bullets = remember {
-        val bulletMat = materialLoader.createColorInstance(Color(0xFFFFB02E))
-        List(BULLET_COUNT) {
-            CubeNode(engine, size = Float3(BULLET_THICK, BULLET_THICK, BULLET_LEN), materialInstance = bulletMat)
-                .apply { isVisible = false }
-        }
-    }
-
-    val botBullets = remember {
-        val mat = materialLoader.createColorInstance(Color(0xFFFF4A2C))
-        List(BOT_BULLET_COUNT) {
-            CubeNode(engine, size = Float3(BULLET_THICK, BULLET_THICK, BULLET_LEN), materialInstance = mat)
-                .apply { isVisible = false }
-        }
-    }
-
-    val muzzleFlash = remember {
-        val mat = materialLoader.createColorInstance(Color(0xFFFFD35A))
-        CubeNode(engine, size = Float3(0.16f, 0.16f, 0.16f), materialInstance = mat).apply { isVisible = false }
-    }
+    // GLB bullets / muzzle fire. Filled by the loader below (LaunchedEffect "5) the GLB bullets and fire").
+    val bulletPools = remember { HashMap<String, FxPool>() }     // bullet file -> pool (your guns)
+    val flashPools = remember { HashMap<String, FxPool>() }      // flash file -> pool (1 model each)
+    val botBullets = remember { ArrayList<Node>() }              // one model per bot bullet slot (bullet_bot.glb)
 
     val fxNodes = remember {
         val spark = materialLoader.createColorInstance(Color(0xFFFFC040))
@@ -460,10 +471,7 @@ internal fun Game3DView(
 
     val nodes = rememberNodes {
         add(gun)
-        addAll(bullets)
-        addAll(botBullets)
         addAll(shield.all())
-        add(muzzleFlash)
         addAll(fxNodes)
         addAll(flagNodes)
     }
@@ -539,6 +547,48 @@ internal fun Game3DView(
         }
     }
 
+    // 5) the GLB bullets and fire (loads in the background while the match starts; until a gun's file is ready it just can't shoot)
+    LaunchedEffect(ready) {
+        if (!ready) return@LaunchedEffect
+        val orange = materialLoader.createColorInstance(Color(0xFFFFB02E))
+        val red = materialLoader.createColorInstance(Color(0xFFFF4A2C))
+        val yellow = materialLoader.createColorInstance(Color(0xFFFFD35A))
+        val specs = GUNS.map { WeaponSpecs.forGun(it.name) }
+        val missing = ArrayList<String>()
+        try {
+            // muzzle fire: one model per file is enough (only one flash shows at a time)
+            for (file in specs.map { it.flashGlb }.distinct()) {
+                withFrameNanos { }
+                val p = buildPool(file, 1, modelLoader, nodes) {
+                    CubeNode(engine, size = Float3(0.16f, 0.16f, 0.16f), materialInstance = yellow)
+                }
+                flashPools[file] = p
+                if (p.usedFallback) missing.add(file)
+            }
+            // your bullets: as many models per file as the guns using that file can have in the air at once
+            for (file in specs.map { it.bulletGlb }.distinct()) {
+                val count = specs.filter { it.bulletGlb == file }.maxOf { it.bulletSlots }
+                withFrameNanos { }
+                val p = buildPool(file, count, modelLoader, nodes) {
+                    CubeNode(engine, size = Float3(BULLET_THICK, BULLET_THICK, BULLET_LEN), materialInstance = orange)
+                }
+                bulletPools[file] = p
+                if (p.usedFallback) missing.add(file)
+            }
+            // bot bullets: one model for each slot in MatchLogic (BOT_BULLET_COUNT), all from bullet_bot.glb
+            withFrameNanos { }
+            val bp = buildPool(WeaponSpecs.BOT_BULLET_GLB, BOT_BULLET_COUNT, modelLoader, nodes) {
+                CubeNode(engine, size = Float3(BULLET_THICK, BULLET_THICK, BULLET_LEN), materialInstance = red)
+            }
+            botBullets.addAll(bp.nodes)
+            if (bp.usedFallback) missing.add(WeaponSpecs.BOT_BULLET_GLB)
+        } catch (e: Throwable) {
+            Log.e("Game3D", "Could not build the bullets", e)
+            missing.add("bullets: ${e.message}")
+        }
+        if (missing.isNotEmpty()) fxNote = "FX file missing: " + missing.joinToString(", ")
+    }
+
     // 4) the bots
     LaunchedEffect(ready) {
         if (!ready) return@LaunchedEffect
@@ -605,7 +655,7 @@ internal fun Game3DView(
             childNodes = nodes,
             environment = environment,
             onFrame = { nanos ->
-                stepGame(nanos, rig, models, cameraNode, engine, gun, bullets, shield, botViews, botBullets, muzzleFlash, fxNodes, flagNodes)
+                stepGame(nanos, rig, models, cameraNode, engine, gun, bulletPools, shield, botViews, botBullets, flashPools, fxNodes, flagNodes)
             }
         )
 
@@ -653,8 +703,8 @@ internal fun Game3DView(
 
         if (!ready) {
             Text(status, color = Color.White, fontSize = 16.sp, modifier = Modifier.align(Alignment.Center))
-        } else if (note.isNotEmpty()) {
-            Text(note, color = Color(0xFFFFB070), fontSize = 12.sp, modifier = Modifier.align(Alignment.TopCenter).padding(top = 4.dp))
+        } else if (note.isNotEmpty() || fxNote.isNotEmpty()) {
+            Text((note + " " + fxNote).trim(), color = Color(0xFFFFB070), fontSize = 12.sp, modifier = Modifier.align(Alignment.TopCenter).padding(top = 4.dp))
         }
     }
 }
@@ -688,11 +738,11 @@ private fun stepGame(
     cameraNode: io.github.sceneview.node.CameraNode,
     engine: Engine,
     gun: Node,
-    bullets: List<CubeNode>,
+    bulletPools: Map<String, FxPool>,
     shield: ShieldRig,
     botViews: List<BotView>,
-    botBullets: List<CubeNode>,
-    muzzleFlash: CubeNode,
+    botBullets: List<Node>,
+    flashPools: Map<String, FxPool>,
     fxNodes: List<CubeNode>,
     flagNodes: List<CubeNode>
 ) {
@@ -905,17 +955,28 @@ private fun stepGame(
         val len = hypot(toX, toZ)
         if (len > 0.5f) { bdirX = toX / len; bdirZ = toZ / len }
     }
-    updateBullets(dt, rig, bullets, bdirX, bdirZ)
+    updateBullets(dt, rig, bulletPools, bdirX, bdirZ)
 
-    if (rig.flashT > 0f && !dead) {
+    // muzzle fire: the GLB of the gun in your hand (flash_*.glb), shown for a moment after every shot
+    val flashSpec = WeaponSpecs.forGun(rig.gunDef.name)
+    val flashNode = flashPools[flashSpec.flashGlb]?.nodes?.firstOrNull()
+    for (p in flashPools.values) {
+        val n = p.nodes[0]
+        if (n !== flashNode && n.isVisible) n.isVisible = false
+    }
+    if (flashNode != null) {
+        if (rig.flashT > 0f && !dead) {
+            rig.flashT -= dt
+            val s = (0.85f + Random.nextFloat() * 0.3f) * flashSpec.flashScale
+            flashNode.position = Position(rig.mx + bdirX * 0.15f, rig.my, rig.mz + bdirZ * 0.15f)
+            flashNode.rotation = Rotation(y = atan2(bdirX, bdirZ) * RAD_TO_DEG)
+            flashNode.scale = Float3(s, s, s)
+            flashNode.isVisible = true
+        } else if (flashNode.isVisible) {
+            flashNode.isVisible = false
+        }
+    } else if (rig.flashT > 0f) {
         rig.flashT -= dt
-        val s = 0.8f + Random.nextFloat() * 0.8f
-        muzzleFlash.position = Position(rig.mx + bdirX * 0.15f, rig.my, rig.mz + bdirZ * 0.15f)
-        muzzleFlash.rotation = Rotation(Random.nextFloat() * 90f, Random.nextFloat() * 90f, Random.nextFloat() * 90f)
-        muzzleFlash.scale = Float3(s, s, s)
-        muzzleFlash.isVisible = true
-    } else if (muzzleFlash.isVisible) {
-        muzzleFlash.isVisible = false
     }
 
     if (mt != null) {
@@ -1007,7 +1068,7 @@ private fun stepBots(
     rig: GameInput,
     mt: MatchState,
     views: List<BotView>,
-    botBullets: List<CubeNode>,
+    botBullets: List<Node>,
     engine: Engine
 ) {
     val barYaw = -rig.camYaw
@@ -1041,9 +1102,9 @@ private fun stepBots(
         v.bar.scale = Float3(max(0.02f, b.hp.toFloat() / BOT_MAX_HP), 1f, 1f)
     }
 
-    for (i in 0 until BOT_BULLET_COUNT) {
+    for (i in 0 until min(BOT_BULLET_COUNT, botBullets.size)) {
         val n = botBullets[i]
-        if (!mt.bAlive[i]) { n.isVisible = false; continue }
+        if (!mt.bAlive[i]) { if (n.isVisible) n.isVisible = false; continue }
         n.position = Position(mt.bx[i], mt.by[i], mt.bz[i])
         n.rotation = Rotation(y = atan2(mt.bdx[i], mt.bdz[i]) * RAD_TO_DEG)
         n.isVisible = true
@@ -1118,38 +1179,75 @@ private fun driveAnimation(
 }
 
 // ---------------- Bullets ----------------
+// Speed, range, fire rate, spread, pellets and damage come from the gun's WeaponSpec (WeaponSpecs.kt).
 
-private fun updateBullets(dt: Float, rig: GameInput, bullets: List<CubeNode>, fx: Float, fz: Float) {
-    if (!rig.shooting) rig.fireTimer = 0f
-    rig.fireTimer -= dt
-    if (rig.shooting && rig.fireTimer <= 0f) {
-        val i = rig.bAlive.indexOfFirst { !it }
-        if (i >= 0) {
+private fun updateBullets(dt: Float, rig: GameInput, pools: Map<String, FxPool>, fx: Float, fz: Float) {
+    val spec = WeaponSpecs.forGun(rig.gunDef.name)
+
+    // Joystick fire: while the aim stick is held the gun keeps trying to shoot, and the cooldown makes the pause.
+    // AUTO guns have a short cooldown (fast fire). SINGLE guns have a long one (sniper 1.25 s, pistol 0.4 s):
+    // shoot, pause, shoot again, with no new tap needed.
+    rig.cooldown = max(0f, rig.cooldown - dt)
+    val pool = pools[spec.bulletGlb]
+    if (rig.shooting && rig.cooldown <= 0f && pool != null) {
+        var fired = false
+        for (p in 0 until spec.pellets) {
+            val i = rig.bAlive.indexOfFirst { !it }
+            if (i < 0) break
+            val slot = pool.acquire()
+            if (slot < 0) break
+            // spread: turn the direction by a random angle inside the gun's cone
+            var dirX = fx
+            var dirZ = fz
+            if (spec.spreadDeg > 0f) {
+                val a = (Random.nextFloat() * 2f - 1f) * spec.spreadDeg * DEG_TO_RAD
+                dirX = fx * cos(a) - fz * sin(a)
+                dirZ = fx * sin(a) + fz * cos(a)
+            }
             rig.bAlive[i] = true
             rig.bx[i] = rig.mx
             rig.bz[i] = rig.mz
             rig.by[i] = rig.my
-            rig.bdx[i] = fx
-            rig.bdz[i] = fz
+            rig.bdx[i] = dirX
+            rig.bdz[i] = dirZ
             rig.bDist[i] = 0f
-            bullets[i].rotation = Rotation(y = atan2(fx, fz) * RAD_TO_DEG)
-            rig.fireTimer = FIRE_INTERVAL
+            rig.bSpec[i] = spec
+            rig.bPool[i] = pool
+            rig.bSlot[i] = slot
+            val node = pool.nodes[slot]
+            node.rotation = Rotation(y = atan2(dirX, dirZ) * RAD_TO_DEG)
+            node.scale = Float3(spec.bulletScale, spec.bulletScale, spec.bulletScale)
+            node.position = Position(rig.mx, rig.my, rig.mz)
+            fired = true
+        }
+        if (fired) {
+            rig.cooldown = spec.shotIntervalSeconds
             rig.flashT = FLASH_TIME
         }
     }
+
     val mt = rig.match
     for (i in 0 until BULLET_COUNT) {
-        if (!rig.bAlive[i]) { bullets[i].isVisible = false; continue }
-        var left = BULLET_SPEED * dt
+        val bp = rig.bPool[i]
+        if (!rig.bAlive[i]) {
+            if (bp != null) {                                  // the bullet just ended: hide its model, give it back
+                bp.nodes[rig.bSlot[i]].isVisible = false
+                bp.release(rig.bSlot[i])
+                rig.bPool[i] = null
+            }
+            continue
+        }
+        val sp = rig.bSpec[i] ?: spec
+        var left = sp.bulletSpeed * dt
         while (left > 0f && rig.bAlive[i]) {
             val step = min(0.25f, left)
             val nx = rig.bx[i] + rig.bdx[i] * step
             val nz = rig.bz[i] + rig.bdz[i] * step
             val wall = rig.play?.bulletHits(nx, rig.by[i], nz) ?: false
-            if (wall || rig.bDist[i] > BULLET_RANGE) {
+            if (wall || rig.bDist[i] > sp.range) {
                 if (wall) spawnBurst(rig, rig.bx[i], rig.by[i], rig.bz[i], 0, SPARK_PIECES)
                 rig.bAlive[i] = false
-            } else if (mt != null && mt.bulletStep(nx, rig.by[i], nz, 0, rig)) {
+            } else if (mt != null && mt.bulletStep(nx, rig.by[i], nz, 0, rig, sp, rig.bDist[i])) {
                 rig.bAlive[i] = false
             } else {
                 rig.bx[i] = nx
@@ -1158,9 +1256,48 @@ private fun updateBullets(dt: Float, rig: GameInput, bullets: List<CubeNode>, fx
             }
             left -= step
         }
-        bullets[i].isVisible = rig.bAlive[i]
-        if (rig.bAlive[i]) bullets[i].position = Position(rig.bx[i], rig.by[i], rig.bz[i])
+        if (bp != null) {
+            val node = bp.nodes[rig.bSlot[i]]
+            if (rig.bAlive[i]) {
+                node.position = Position(rig.bx[i], rig.by[i], rig.bz[i])
+                if (!node.isVisible) node.isVisible = true
+            } else {
+                node.isVisible = false
+                bp.release(rig.bSlot[i])
+                rig.bPool[i] = null
+            }
+        }
     }
+}
+
+// Makes [count] models of one GLB file and adds them to the scene (hidden). If the file is missing, the rest are plain
+// shapes made by [fallback], so the game still runs.
+private suspend fun buildPool(
+    file: String,
+    count: Int,
+    modelLoader: ModelLoader,
+    scene: MutableList<Node>,
+    fallback: () -> Node
+): FxPool {
+    val list = ArrayList<Node>()
+    var usedFallback = false
+    for (k in 0 until count) {
+        var n: Node? = null
+        if (!usedFallback) {
+            try {
+                n = ModelNode(modelInstance = modelLoader.createModelInstance(file), autoAnimate = false)
+            } catch (e: Throwable) {
+                Log.e("Game3D", "Could not load $file, using a plain shape", e)
+                usedFallback = true
+            }
+        }
+        val node = n ?: fallback()
+        node.isVisible = false
+        scene.add(node)
+        list.add(node)
+        if (k % 4 == 3) withFrameNanos { }
+    }
+    return FxPool(file, list, usedFallback)
 }
 
 // ---------------- Hit effects ----------------
