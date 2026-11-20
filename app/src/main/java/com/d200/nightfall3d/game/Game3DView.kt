@@ -263,6 +263,10 @@ internal class GameInput {
     var aimY = 0f
     var paused = false
     var crouch = false
+    var grenades by mutableIntStateOf(0)       // grenades left (the HUD badge shows it)
+    var gasCans by mutableIntStateOf(0)        // gas cans left
+    var throwReq = 0                           // HUD button: 1 = throw a grenade, 2 = throw a gas can
+    val thr = ThrowState()                     // flying grenades, flashes and gas clouds (Throwables.kt)
     var shieldOn by mutableStateOf(false)
     var shieldHp = SHIELD_MAX_HITS
     var shieldIdx = -1                 // which shield (index in SHIELDS) the shieldHp belongs to
@@ -435,6 +439,20 @@ internal fun Game3DView(
         }.also { l -> l.forEach { it.isVisible = false } }
     }
 
+    // Grenade + gas models (Throwables.kt)
+    val throwNodes = remember {
+        val fragMat = materialLoader.createColorInstance(Color(0xFF2E4A1F))
+        val canMat = materialLoader.createColorInstance(Color(0xFFB8C21E))
+        val boomMat = materialLoader.createColorInstance(Color(0xFFFF9A1A))
+        val gasMat = materialLoader.createColorInstance(Color(0xFF6FD83A))
+        val bombs = List(THROW_MAX * 2) { i ->
+            CubeNode(engine, size = Float3(0.16f, 0.2f, 0.16f), materialInstance = if (i < THROW_MAX) fragMat else canMat)
+        }
+        val flash = List(THROW_FLASH_MAX) { CubeNode(engine, size = Float3(1f, 1f, 1f), materialInstance = boomMat) }
+        val puffs = List(GAS_MAX * GAS_PUFFS) { CubeNode(engine, size = Float3(0.6f, 0.6f, 0.6f), materialInstance = gasMat) }
+        ThrowNodes(bombs, flash, puffs).also { t -> t.all().forEach { it.isVisible = false } }
+    }
+
     // Capture the Flag. Team 0 (your flag) is orange, team 1 (enemy) is cyan. Hidden unless the mode is Capture the Flag.
     val flagNodes = remember {
         val steel = materialLoader.createColorInstance(Color(0xFF3A3F45))
@@ -473,6 +491,7 @@ internal fun Game3DView(
         add(gun)
         addAll(shield.all())
         addAll(fxNodes)
+        addAll(throwNodes.all())
         addAll(flagNodes)
     }
 
@@ -655,7 +674,7 @@ internal fun Game3DView(
             childNodes = nodes,
             environment = environment,
             onFrame = { nanos ->
-                stepGame(nanos, rig, models, cameraNode, engine, gun, bulletPools, shield, botViews, botBullets, flashPools, fxNodes, flagNodes)
+                stepGame(nanos, rig, models, cameraNode, engine, gun, bulletPools, shield, botViews, botBullets, flashPools, fxNodes, flagNodes, throwNodes)
             }
         )
 
@@ -744,7 +763,8 @@ private fun stepGame(
     botBullets: List<Node>,
     flashPools: Map<String, FxPool>,
     fxNodes: List<CubeNode>,
-    flagNodes: List<CubeNode>
+    flagNodes: List<CubeNode>,
+    throwNodes: ThrowNodes
 ) {
     if (rig.paused) { rig.lastNanos = nanos; return }
     if (rig.handMode) { rig.shooting = false; rig.aimHeld = false; rig.scopeOn = false }
@@ -955,6 +975,7 @@ private fun stepGame(
         val len = hypot(toX, toZ)
         if (len > 0.5f) { bdirX = toX / len; bdirZ = toZ / len }
     }
+    updateThrowables(dt, rig, throwNodes, aimDirX, aimDirZ, dead)
     updateBullets(dt, rig, bulletPools, bdirX, bdirZ)
 
     // muzzle fire: the GLB of the gun in your hand (flash_*.glb), shown for a moment after every shot
