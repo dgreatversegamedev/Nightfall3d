@@ -73,6 +73,16 @@ class MatchConfig {
 
     // Capture the Flag: how many captures win the match. 0 = no limit (keep capturing until the time is up).
     var captureLimit: Int = 0
+
+    // Team sizes for Team Deathmatch, Capture the Flag and Zombies.
+    // myTeam = how many players are on YOUR team, and that number includes you (1 to MAX_TEAM).
+    // otherTeam = how many players are on the other team (1 to MAX_TEAM). Not used in Zombies.
+    var myTeam: Int = 3
+    var otherTeam: Int = 3
+
+    companion object {
+        const val MAX_TEAM = 5
+    }
 }
 
 class GameSettings {
