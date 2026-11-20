@@ -29,10 +29,15 @@ class FakeGameApi : GameApi {
 
     // Real characters only. The glbPath is a file in app/src/main/assets/.
     // To add the next one: put its .glb in assets, add it to CHAR_FILES in Game3DView.kt, and add a line here.
+    // Orange uses orange_amor.glb (the helmet file orange_helmet.glb is for the character screen later, not here).
+    // The stats, skill name and skill text of Orange are placeholders: change them any time.
     override fun characters() = listOf(
         Character("blue", "Blue", "Fast and balanced. The first fighter of the squad.",
             "Shadow Dash", "Dash forward and become invisible for a short time.",
-            0.60f, 0.85f, 0.70f, 0xFF3B82F6, "char_blue.glb", level = 12, rank = "Silver")
+            0.60f, 0.85f, 0.70f, 0xFF3B82F6, "char_blue.glb", level = 12, rank = "Silver"),
+        Character("orange", "Orange", "Heavy armour. Built to take the hits.",
+            "Iron Skin", "Take less damage for a short time.",
+            0.85f, 0.55f, 0.70f, 0xFFFF8A00, "orange_amor.glb", level = 1, rank = "Rookie")
     )
 
     override fun items() = listOf(
