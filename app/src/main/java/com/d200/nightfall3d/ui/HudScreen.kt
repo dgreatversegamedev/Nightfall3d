@@ -312,6 +312,16 @@ private fun ScoreBoard(k: Float, modifier: Modifier, mt: MatchState) {
                 }
             }
         } else {
+            if (mt.koth && mt.objText.isNotEmpty()) {
+                NfText(
+                    mt.objText,
+                    size = fsz(k, 19f),
+                    color = Orange,
+                    bold = true,
+                    modifier = Modifier.fillMaxWidth(),
+                    align = TextAlign.Center
+                )
+            }
             mt.rows().take(3).forEachIndexed { i, r ->
                 Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
                     NfText(
@@ -342,7 +352,8 @@ fun HudScreen(api: GameApi, onExit: () -> Unit) {
     // Deathmatch / Team Deathmatch / Capture the Flag: the match with the bots. null for every other mode (just you).
     val matchOn = api.match.mode == GameMode.DEATHMATCH ||
         api.match.mode == GameMode.TEAM_DEATHMATCH ||
-        api.match.mode == GameMode.CAPTURE_FLAG
+        api.match.mode == GameMode.CAPTURE_FLAG ||
+        api.match.mode == GameMode.KING_OF_HILL
     val match = remember {
         if (matchOn) {
             MatchState(
@@ -487,7 +498,7 @@ fun HudScreen(api: GameApi, onExit: () -> Unit) {
                         size = fsz(k, 24f),
                         bold = true,
                         color = Color(0xFFFFE066),
-                        modifier = atTL(k, 620f, if (match.ctf) 215f else 160f).width((430 * k).dp),
+                        modifier = atTL(k, 620f, if (match.ctf || match.koth) 215f else 160f).width((430 * k).dp),
                         align = TextAlign.Center
                     )
                 }
