@@ -61,7 +61,10 @@ import kotlin.random.Random
 // Shield files (see Shields.kt): nightfall_shield_blue_hex.glb, nightfall_shield_pink.glb,
 //   nightfall_shield_geo_triangles.glb, nightfall_shield_hex_sphere.glb, shield_storm_spark.glb
 //
-// CHANGES IN THIS VERSION (GLB FIRE)
+// CHANGES IN THIS VERSION
+//  KING OF THE HILL: the orange zone ring is drawn here (createHillNodes / updateHill come from KingOfHill.kt).
+//     4 small additions: GameInput.hillNodes, the hillNodes list, addAll(hillNodes) and updateHill(...) in stepGame.
+// (older: GLB FIRE)
 //  A) BULLETS AND MUZZLE FIRE ARE NOW GLB FILES (put them in app/src/main/assets/). The names come from WeaponSpecs.kt:
 //     bullet_rifle / bullet_smg / bullet_sniper / bullet_pistol / bullet_shotgun_pellet .glb  (your bullets)
 //     bullet_bot.glb (every bot bullet, its own colour)
@@ -252,6 +255,7 @@ internal class GameInput {
     var z = 0f
     var play: PlayArena? = null
     var match: MatchState? = null
+    var hillNodes: List<CubeNode> = emptyList()    // King of the Hill ring (KingOfHill.kt)
     var camPitch = 0f
     var camYaw = 0f
     var faceDeg = 0f
@@ -487,12 +491,17 @@ internal fun Game3DView(
     // The shield (the nodes are made in ShieldView.kt, the GLB is loaded further down)
     val shield = remember { createShieldRig(engine, materialLoader) }
 
+    // King of the Hill: the orange zone ring (KingOfHill.kt). Hidden unless the mode is King of the Hill.
+    val hillNodes = remember { createHillNodes(engine, materialLoader) }
+    rig.hillNodes = hillNodes
+
     val nodes = rememberNodes {
         add(gun)
         addAll(shield.all())
         addAll(fxNodes)
         addAll(throwNodes.all())
         addAll(flagNodes)
+        addAll(hillNodes)
     }
 
     // 0) the shield GLB (the one equipped in Weapons > SHIELDS). Loads again if another shield is chosen.
@@ -1016,6 +1025,7 @@ private fun stepGame(
     updateShield(rig, shield, nanos, dt)
     updateFx(dt, rig, fxNodes)
     updateFlags(mt, flagNodes, nanos)
+    updateHill(mt, rig.hillNodes, nanos)
 
     val dist = if (rig.scopeOn) SCOPE_DIST else CAM_DIST * rig.zoom
     val pr = rig.camPitch * DEG_TO_RAD
