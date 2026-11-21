@@ -29,8 +29,15 @@ import kotlin.math.sin
 //
 // If a GLB is missing or broken, a plain blue ball in the shield's colour is shown instead (no crash).
 //
-// TUNING: SHIELD_FIT makes every shield bigger or smaller. The GLB is scaled so its biggest side
-// is SHIELD_R * 2 * SHIELD_FIT meters wide, and it is centered on the player's chest.
+// CHANGES IN THIS VERSION (SHIELD FIT)
+//  Two ways to place a shield, chosen per shield in Shields.kt (floorAnchored):
+//   floorAnchored = true  : the GLB keeps its own size and its floor (origin) sits on the ground under the player.
+//                           ShieldDef.modelScale makes it bigger or smaller. Used by Classic Hex (measured from its file).
+//   floorAnchored = false : the old way (TUNING below). Shields not measured yet still use it.
+//  The shield now also grows and shrinks from the floor, not from his chest.
+//
+// TUNING (old way only): SHIELD_FIT makes every old-way shield bigger or smaller. The GLB is scaled so its biggest
+// side is SHIELD_R * 2 * SHIELD_FIT meters wide, and it is centered on the player's chest.
 // =====================================================================
 
 internal const val SHIELD_R = 1.1f
@@ -76,12 +83,20 @@ internal fun loadShieldModel(sh: ShieldRig, loader: ModelLoader, index: Int) {
         }
         sh.model = null
         sh.loadedIdx = -1
-        val m = ModelNode(
-            modelInstance = loader.createModelInstance(def.glb),
-            autoAnimate = true,
-            scaleToUnits = SHIELD_R * 2f * SHIELD_FIT,
-            centerOrigin = Position(0f, 0f, 0f)
-        )
+        val m = if (def.floorAnchored) {
+            // own size, own origin (the floor): no scaling and no centering here
+            ModelNode(
+                modelInstance = loader.createModelInstance(def.glb),
+                autoAnimate = true
+            )
+        } else {
+            ModelNode(
+                modelInstance = loader.createModelInstance(def.glb),
+                autoAnimate = true,
+                scaleToUnits = SHIELD_R * 2f * SHIELD_FIT,
+                centerOrigin = Position(0f, 0f, 0f)
+            )
+        }
         sh.root.addChildNode(m)
         sh.model = m
         sh.loadedIdx = i
@@ -171,7 +186,8 @@ internal fun updateShield(rig: GameInput, sh: ShieldRig, nanos: Long, dt: Float)
     val blinkHide = low && !breaking && ((t * 6f).toInt() % 5 == 0)
 
     val cx = rig.x
-    val cy = rig.y + rig.jumpH + SHIELD_CY
+    val feetY = rig.y + rig.jumpH
+    val cy = feetY + SHIELD_CY
     val cz = rig.z
 
     val modelReady = sh.model != null && sh.loadedIdx == sel
@@ -179,8 +195,15 @@ internal fun updateShield(rig: GameInput, sh: ShieldRig, nanos: Long, dt: Float)
     val showFallback = sh.failed && !modelReady && !blinkHide
 
     if (showModel) {
-        sh.root.position = Position(cx, cy, cz)
-        sh.root.scale = Float3(k, k, k)
+        if (def.floorAnchored) {
+            // the file's floor is on the ground under him, and it grows from the floor
+            val s = k * def.modelScale
+            sh.root.position = Position(cx, feetY, cz)
+            sh.root.scale = Float3(s, s, s)
+        } else {
+            sh.root.position = Position(cx, cy, cz)
+            sh.root.scale = Float3(k, k, k)
+        }
     }
     if (showFallback) {
         val r = SHIELD_R * 0.97f * k
