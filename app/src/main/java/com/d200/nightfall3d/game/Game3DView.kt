@@ -61,7 +61,11 @@ import kotlin.random.Random
 // Shield files (see Shields.kt): nightfall_shield_blue_hex.glb, nightfall_shield_pink.glb,
 //   nightfall_shield_geo_triangles.glb, nightfall_shield_hex_sphere.glb, shield_storm_spark.glb
 //
-// CHANGES IN THIS VERSION (ORANGE GUN FIT)
+// CHANGES IN THIS VERSION (NEW GRENADE + GAS CAN)
+//  The grenade, gas can, explosion and gas cloud models are now made in Throwables.kt (createThrowNodes).
+//  This file only calls it: see "val throwNodes = remember { createThrowNodes(...) }". Nothing else changed.
+//
+// (older) ORANGE GUN FIT
 //  1) ORANGE GUNS USE THE GUN FIT LAB 2 MEASUREMENT. MP5, Carbine and Rifle have their measured fit
 //     (same hand bone 40 = R_Hand, same turn, same position, own scale and grip). Checked on all 6 Orange clips:
 //     the barrel points straight forward and level in every clip, and the left hand stays on the same spot of the gun.
@@ -533,19 +537,8 @@ internal fun Game3DView(
         }.also { l -> l.forEach { it.isVisible = false } }
     }
 
-    // Grenade + gas models (Throwables.kt)
-    val throwNodes = remember {
-        val fragMat = materialLoader.createColorInstance(Color(0xFF2E4A1F))
-        val canMat = materialLoader.createColorInstance(Color(0xFFB8C21E))
-        val boomMat = materialLoader.createColorInstance(Color(0xFFFF9A1A))
-        val gasMat = materialLoader.createColorInstance(Color(0xFF6FD83A))
-        val bombs = List(THROW_MAX * 2) { i ->
-            CubeNode(engine, size = Float3(0.16f, 0.2f, 0.16f), materialInstance = if (i < THROW_MAX) fragMat else canMat)
-        }
-        val flash = List(THROW_FLASH_MAX) { CubeNode(engine, size = Float3(1f, 1f, 1f), materialInstance = boomMat) }
-        val puffs = List(GAS_MAX * GAS_PUFFS) { CubeNode(engine, size = Float3(0.6f, 0.6f, 0.6f), materialInstance = gasMat) }
-        ThrowNodes(bombs, flash, puffs).also { t -> t.all().forEach { it.isVisible = false } }
-    }
+    // Grenade, gas can, explosion and gas cloud models (all made in Throwables.kt)
+    val throwNodes = remember { createThrowNodes(engine, materialLoader) }
 
     // Capture the Flag. Team 0 (your flag) is orange, team 1 (enemy) is cyan. Hidden unless the mode is Capture the Flag.
     val flagNodes = remember {
