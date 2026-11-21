@@ -30,23 +30,30 @@ import kotlin.random.Random
 // =====================================================================
 // Throwables.kt  -  GRENADE and GAS CAN  (replaces the old file)
 //
-// Same design as the HTML Throwables Lab:
-//  * 3D grenade (ridged olive body, neck, fuse head, lever, pin ring) and 3D gas can (hazard band, valve, red wheel).
-//  * GRENADE blast: flash, fireball, smoke column, dust ring, sparks, metal shards, scorch mark.
-//  * GAS CAN: leaks while it flies, pops (flash, white vapour jet, lid and valve wheel fly off),
-//    then a green cloud of soft round puffs that swirl, spread low along the ground and fade out.
+// WHAT CHANGED IN THIS VERSION
+//  GAS
+//   * The cloud is now 8.5 m wide (was 4) and stays 18 seconds (was 8), thinning out in the last 4 seconds.
+//   * It is NOT round bubbles any more. Each cloud is 80 flat, wide puffs in three layers:
+//       - a thin low haze that spreads fast along the ground,
+//       - a body of squashed puffs that roll and swirl,
+//       - a denser, slower core in the middle.
+//     The puffs are very see-through, so where many overlap the cloud is thick and at the edge it is thin and soft.
+//     Colours go from yellow-green to dark sick green. Materials are matte (no shiny bubble highlight).
+//   * Damage depends on how close you are: three shells (edge / middle / core) are added together, so standing in
+//     the middle hurts about 3.5 HP per second, the edge about 1. The whole 18 seconds in the middle is about half
+//     of a 100 HP player. It fades out with the cloud.
+//  GRENADE
+//   * Blast radius 10 m (was 4.5). Damage is 50 (half of 100 HP) in the centre and falls off with distance
+//     (MatchState.blast keeps its own falloff down to 25% at the edge).
+//   * Much bigger and thicker explosion: flash, big fireball, a rising smoke column that spreads out,
+//     a fast flat dust ring (the shockwave), lots of sparks, metal shards, a big scorch mark.
 //
-// HOW YOU THROW (HudScreen.kt):
-//  Press and hold the GRENADE or GAS button, drag away from it to aim. The drag direction is the throw direction
-//  (up = forward, relative to the camera) and the drag length is how far it goes (THROW_MIN_DIST .. THROW_MAX_DIST).
-//  While you hold, a dotted line shows the flight path, and a ring on the ground shows where it lands and how big
-//  the blast (orange) or gas (green) is. Let go to throw. A quick tap throws straight ahead THROW_DEFAULT_DIST metres.
+// HOW YOU THROW (HudScreen.kt): unchanged.
+//  Press and hold the GRENADE or GAS button, drag away from it to aim, let go to throw. Quick tap = straight ahead.
+//  RELOAD: unchanged (one comes back every THROW_RELOAD_SEC).
 //
-// RELOAD: you start with ThrowLoadout.GRENADE_COUNT grenades and GAS_COUNT gas cans. Every used one comes back one at
-//  a time: THROW_RELOAD_SEC after the first one was used you get one back, then the timer runs again for the next.
-//
-// Damage numbers: grenade = MatchState.blast, gas = MatchState.gasHurt (unchanged).
-// All numbers are the constants below.
+// If the build complains about the 4 numbers in createColorInstance(..., 0f, 1f, 0f) (matte look),
+// delete the ", 0f, 1f, 0f" part in the helper "matte" below. Everything else still works.
 // =====================================================================
 
 object ThrowLoadout {
@@ -59,7 +66,7 @@ object ThrowLoadout {
 internal const val THROW_MAX = 4           // flying at the same time (per kind)
 internal const val THROW_FLASH_MAX = 4     // explosion flashes at the same time
 internal const val GAS_MAX = 2             // gas clouds at the same time
-internal const val GAS_PUFFS = 48          // round puffs that make one cloud
+internal const val GAS_PUFFS = 80          // flat puffs that make one cloud
 
 // ---- aim and throw ----
 private const val THROW_MIN_DIST = 3f      // shortest throw (m)
@@ -71,28 +78,33 @@ private const val THROW_HAND_Y = 1.4f      // height he lets go of it
 private const val THROW_RELOAD_SEC = 30f   // seconds for ONE used grenade / gas can to come back
 
 private const val GRENADE_FUSE = 2.6f
-private const val GRENADE_RADIUS = 4.5f
-private const val GRENADE_DMG = 130        // at the centre (bots have 100 HP). Falls to 25% at the edge.
+private const val GRENADE_RADIUS = 10f
+private const val GRENADE_DMG = 50         // centre = half of 100 HP. MatchState.blast lowers it with distance.
 
 private const val GAS_FUSE = 2.2f
-private const val GAS_RADIUS = 4.0f
-private const val GAS_SEC = 8f
-private const val GAS_DPS = 14f            // HP per second to every enemy inside
-private const val GAS_EMIT_SEC = 1.9f      // the can keeps spraying this long after it pops
+private const val GAS_RADIUS = 8.5f
+private const val GAS_SEC = 18f
+private const val GAS_EMIT_SEC = 2.0f      // the can keeps spraying this long after it pops
+private const val GAS_GROW_SEC = 2.5f      // time the cloud needs to reach full size
+private const val GAS_FADE_SEC = 4f        // thins out during the last seconds
+// damage shells (HP per second, added together): edge + middle + core
+private const val GAS_DPS_EDGE = 1.0f      // everywhere inside the cloud
+private const val GAS_DPS_MID = 1.1f       // inside 62% of the radius
+private const val GAS_DPS_CORE = 1.4f      // inside 30% of the radius  (core total = 3.5 HP/s)
 
 private const val GUIDE_N = 18             // dots on the aim line
-private const val RING_N = 28              // blocks in the landing ring
-private const val DEBRIS_N = 14
+private const val RING_N = 40              // blocks in the landing ring
+private const val DEBRIS_N = 16
 private const val SCORCH_N = 4
-private const val SCORCH_SEC = 22f
+private const val SCORCH_SEC = 26f
 
 // ---- particle pool: one range of nodes for each kind ----
-private const val P_F0 = 0;   private const val P_F1 = 36      // fireball
-private const val P_S0 = 36;  private const val P_S1 = 66      // smoke
-private const val P_D0 = 66;  private const val P_D1 = 90      // dust ring
-private const val P_K0 = 90;  private const val P_K1 = 150     // sparks
-private const val P_V0 = 150; private const val P_V1 = 174     // white vapour
-private const val P_G0 = 174                                   // gas puffs (GAS_MAX * GAS_PUFFS)
+private const val P_F0 = 0;   private const val P_F1 = 40      // fireball
+private const val P_S0 = 40;  private const val P_S1 = 100     // smoke
+private const val P_D0 = 100; private const val P_D1 = 128     // dust ring
+private const val P_K0 = 128; private const val P_K1 = 200     // sparks
+private const val P_V0 = 200; private const val P_V1 = 232     // white vapour
+private const val P_G0 = 232                                   // gas puffs (GAS_MAX * GAS_PUFFS)
 private const val PN = P_G0 + GAS_MAX * GAS_PUFFS
 
 internal class ThrowState {
@@ -121,6 +133,7 @@ internal class ThrowState {
     val gasX = FloatArray(GAS_MAX)
     val gasY = FloatArray(GAS_MAX)
     val gasZ = FloatArray(GAS_MAX)
+    val gasR = FloatArray(GAS_MAX)          // the radius the cloud has right now (grows in the first seconds)
 
     // particles
     val pLife = FloatArray(PN)
@@ -139,6 +152,8 @@ internal class ThrowState {
     val pHold = FloatArray(PN)
     val pTurb = FloatArray(PN)
     val pPh = FloatArray(PN)
+    val pSq = FloatArray(PN)                // how flat the puff is (1 = round ball, 0.3 = flat pancake)
+    val pTy = FloatArray(PN)                // gas: the height above the ground this puff likes to float at
 
     // metal pieces
     val dLife = FloatArray(DEBRIS_N)
@@ -215,6 +230,8 @@ internal class ThrowNodes(
 /** Called once from Game3DView. Builds every model and hides it. */
 internal fun createThrowNodes(engine: Engine, ml: MaterialLoader): ThrowNodes {
     fun c(r: Float, g: Float, b: Float, a: Float = 1f) = ml.createColorInstance(Color(r, g, b, a))
+    // matte: no shiny highlight, so smoke and gas do not look like glass balls
+    fun matte(r: Float, g: Float, b: Float, a: Float = 1f) = ml.createColorInstance(Color(r, g, b, a), 0f, 1f, 0f)
 
     val olive = c(0.34f, 0.39f, 0.17f)
     val oliveDark = c(0.20f, 0.24f, 0.10f)
@@ -291,20 +308,26 @@ internal fun createThrowNodes(engine: Engine, ml: MaterialLoader): ThrowNodes {
     val flash = List(THROW_FLASH_MAX) { SphereNode(engine, radius = 0.5f, materialInstance = flashMat).apply { isVisible = false } }
 
     // particles, one material set for each kind
-    val fireMats = listOf(c(1f, 0.9f, 0.55f, 0.95f), c(1f, 0.55f, 0.10f, 0.9f), c(0.9f, 0.25f, 0.05f, 0.85f))
-    val smokeMats = listOf(c(0.16f, 0.15f, 0.14f, 0.6f), c(0.30f, 0.29f, 0.28f, 0.55f))
-    val dustMat = c(0.6f, 0.53f, 0.43f, 0.5f)
-    val sparkMat = c(1f, 0.8f, 0.3f)
-    val vaporMat = c(0.9f, 1f, 0.85f, 0.5f)
-    val gasMats = listOf(c(0.62f, 0.98f, 0.28f, 0.24f), c(0.40f, 0.80f, 0.16f, 0.24f), c(0.52f, 0.9f, 0.22f, 0.24f))
+    val fireMats = listOf(matte(1f, 0.92f, 0.60f, 0.95f), matte(1f, 0.58f, 0.12f, 0.88f), matte(0.92f, 0.28f, 0.06f, 0.80f))
+    val smokeMats = listOf(matte(0.10f, 0.095f, 0.09f, 0.50f), matte(0.22f, 0.21f, 0.20f, 0.45f), matte(0.34f, 0.33f, 0.31f, 0.38f))
+    val dustMat = matte(0.62f, 0.55f, 0.45f, 0.40f)
+    val sparkMat = matte(1f, 0.82f, 0.32f)
+    val vaporMat = matte(0.92f, 1f, 0.88f, 0.40f)
+    // gas: very see-through so overlapping puffs build up a thick middle and a thin, soft edge
+    val gasMats = listOf(
+        matte(0.70f, 0.95f, 0.30f, 0.13f),   // yellow-green
+        matte(0.50f, 0.82f, 0.20f, 0.14f),   // green
+        matte(0.38f, 0.68f, 0.15f, 0.15f),   // dark sick green
+        matte(0.62f, 0.90f, 0.26f, 0.11f)    // light haze
+    )
     val fx = List(PN) { i ->
         val m = when {
             i < P_F1 -> fireMats[i % 3]
-            i < P_S1 -> smokeMats[i % 2]
+            i < P_S1 -> smokeMats[i % 3]
             i < P_D1 -> dustMat
             i < P_K1 -> sparkMat
             i < P_G0 -> vaporMat
-            else -> gasMats[i % 3]
+            else -> gasMats[i % 4]
         }
         SphereNode(engine, radius = 0.5f, materialInstance = m).apply { isVisible = false }
     }
@@ -312,7 +335,7 @@ internal fun createThrowNodes(engine: Engine, ml: MaterialLoader): ThrowNodes {
     val shardMat = c(0.17f, 0.18f, 0.16f)
     val debris = List(DEBRIS_N) { CubeNode(engine, size = Float3(0.06f, 0.025f, 0.04f), materialInstance = shardMat).apply { isVisible = false } }
 
-    val scorchMat = c(0.03f, 0.03f, 0.03f, 0.65f)
+    val scorchMat = matte(0.03f, 0.03f, 0.03f, 0.65f)
     val scorch = List(SCORCH_N) { SphereNode(engine, radius = 1f, materialInstance = scorchMat).apply { isVisible = false } }
 
     val dotMat = c(1f, 1f, 1f, 0.9f)
@@ -320,8 +343,8 @@ internal fun createThrowNodes(engine: Engine, ml: MaterialLoader): ThrowNodes {
 
     val ringGMat = c(1f, 0.45f, 0.1f, 0.85f)
     val ringCMat = c(0.5f, 1f, 0.25f, 0.85f)
-    val ringG = List(RING_N) { CubeNode(engine, size = Float3(1.0f, 0.04f, 0.1f), materialInstance = ringGMat).apply { isVisible = false } }
-    val ringC = List(RING_N) { CubeNode(engine, size = Float3(0.9f, 0.04f, 0.1f), materialInstance = ringCMat).apply { isVisible = false } }
+    val ringG = List(RING_N) { CubeNode(engine, size = Float3(1.2f, 0.04f, 0.12f), materialInstance = ringGMat).apply { isVisible = false } }
+    val ringC = List(RING_N) { CubeNode(engine, size = Float3(1.1f, 0.04f, 0.12f), materialInstance = ringCMat).apply { isVisible = false } }
 
     return ThrowNodes(grenades, cans, flash, fx, debris, scorch, dots, ringG, ringC)
 }
@@ -332,10 +355,16 @@ internal fun createThrowNodes(engine: Engine, ml: MaterialLoader): ThrowNodes {
 
 private fun rr(a: Float, b: Float): Float = a + Random.nextFloat() * (b - a)
 
+private fun smooth01(x: Float): Float {
+    val t = x.coerceIn(0f, 1f)
+    return t * t * (3f - 2f * t)
+}
+
 private fun spawnP(
     st: ThrowState, from: Int, to: Int,
     x: Float, y: Float, z: Float, vx: Float, vy: Float, vz: Float,
-    life: Float, s0: Float, s1: Float, drag: Float, grav: Float, floor: Float, hold: Float, turb: Float = 0f
+    life: Float, s0: Float, s1: Float, drag: Float, grav: Float, floor: Float, hold: Float, turb: Float = 0f,
+    sq: Float = 1f, ty: Float = 0f
 ) {
     var i = from
     while (i < to && st.pLife[i] > 0f) i++
@@ -347,6 +376,7 @@ private fun spawnP(
     st.pS0[i] = s0; st.pS1[i] = s1
     st.pDrag[i] = drag; st.pGrav[i] = grav
     st.pFloor[i] = floor; st.pHold[i] = hold; st.pTurb[i] = turb
+    st.pSq[i] = sq; st.pTy[i] = ty
     st.pPh[i] = Random.nextFloat() * 20f
 }
 
@@ -364,7 +394,7 @@ private fun spawnDebris(st: ThrowState, x: Float, y: Float, z: Float, vx: Float,
 private fun spawnFlash(st: ThrowState, x: Float, y: Float, z: Float, big: Float) {
     val f = st.flashT.indexOfFirst { it <= 0f }
     if (f < 0) return
-    st.flashT[f] = 0.28f
+    st.flashT[f] = 0.30f
     st.flashBig[f] = big
     st.flashX[f] = x; st.flashY[f] = y; st.flashZ[f] = z
 }
@@ -381,39 +411,39 @@ private fun spawnScorch(st: ThrowState, x: Float, y: Float, z: Float) {
 // ---------------------------------------------------------------------
 
 private fun boomGrenade(st: ThrowState, x: Float, y0: Float, z: Float, gy: Float) {
-    val y = max(y0, gy + 0.25f)
+    val y = max(y0, gy + 0.3f)
     val twoPi = 2f * PI.toFloat()
-    spawnFlash(st, x, y, z, 5f)
-    // fireball
-    for (n in 0 until 24) {
-        val u = rr(-1f, 1f); val a = rr(0f, twoPi); val s = sqrt(1f - u * u); val sp = rr(2f, 7f)
-        spawnP(st, P_F0, P_F1, x + cos(a) * s * 0.2f, y + u * 0.2f, z + sin(a) * s * 0.2f,
-            cos(a) * s * sp, abs(u) * sp * 0.7f + 1f, sin(a) * s * sp,
-            rr(0.45f, 0.9f), 0.8f, rr(2.6f, 4.4f), 3.4f, -2f, gy + 0.1f, 0.15f)
+    spawnFlash(st, x, y, z, 11f)
+    // fireball: big, hot core going to dark orange at the edge
+    for (n in 0 until 36) {
+        val u = rr(-1f, 1f); val a = rr(0f, twoPi); val s = sqrt(1f - u * u); val sp = rr(2f, 9f)
+        spawnP(st, P_F0, P_F1, x + cos(a) * s * 0.3f, y + u * 0.3f, z + sin(a) * s * 0.3f,
+            cos(a) * s * sp, abs(u) * sp * 0.8f + 1.5f, sin(a) * s * sp,
+            rr(0.5f, 1.1f), 1.2f, rr(4.5f, 8.5f), 3.0f, -2.5f, gy + 0.2f, 0.12f)
     }
-    // smoke column
-    for (n in 0 until 28) {
-        val a = rr(0f, twoPi); val sp = rr(0.6f, 3f)
-        spawnP(st, P_S0, P_S1, x + cos(a) * 0.3f, y * 0.6f, z + sin(a) * 0.3f,
-            cos(a) * sp, rr(1.4f, 3.8f), sin(a) * sp,
-            rr(1.8f, 3.6f), 1f, rr(4f, 6.4f), 1.3f, -0.2f, gy + 0.3f, 0.3f, 0.8f)
+    // smoke column: rises, then spreads out wide at the top (stays 3 to 6 seconds)
+    for (n in 0 until 54) {
+        val a = rr(0f, twoPi); val sp = rr(0.8f, 5.5f)
+        spawnP(st, P_S0, P_S1, x + cos(a) * 0.4f, y * 0.6f, z + sin(a) * 0.4f,
+            cos(a) * sp, rr(2.2f, 7.5f), sin(a) * sp,
+            rr(3.0f, 6.0f), 1.5f, rr(6f, 11f), 1.2f, -0.35f, gy + 0.4f, 0.3f, 1.1f, rr(0.75f, 1f))
     }
-    // dust ring along the ground
-    for (n in 0 until 22) {
-        val a = rr(0f, twoPi); val sp = rr(6f, 10f)
-        spawnP(st, P_D0, P_D1, x, gy + 0.2f, z, cos(a) * sp, rr(0.2f, 1f), sin(a) * sp,
-            rr(0.9f, 1.5f), 0.8f, rr(2.4f, 3.6f), 3.2f, 0f, gy + 0.15f, 0.1f)
+    // dust ring along the ground = the shockwave (flat, fast, wide)
+    for (n in 0 until 26) {
+        val a = rr(0f, twoPi); val sp = rr(11f, 19f)
+        spawnP(st, P_D0, P_D1, x, gy + 0.3f, z, cos(a) * sp, rr(0.2f, 1.2f), sin(a) * sp,
+            rr(1.0f, 1.8f), 1.2f, rr(4f, 6.5f), 2.6f, 0f, gy + 0.2f, 0.1f, 0f, 0.4f)
     }
     // sparks
-    for (n in 0 until 50) {
-        val u = rr(-1f, 1f); val a = rr(0f, twoPi); val s = sqrt(1f - u * u); val sp = rr(6f, 17f)
-        spawnP(st, P_K0, P_K1, x, y, z, cos(a) * s * sp, abs(u) * sp + 2f, sin(a) * s * sp,
-            rr(0.5f, 1.4f), 0.16f, 0.05f, 0.4f, 16f, gy + 0.03f, 0.5f)
+    for (n in 0 until 70) {
+        val u = rr(-1f, 1f); val a = rr(0f, twoPi); val s = sqrt(1f - u * u); val sp = rr(8f, 24f)
+        spawnP(st, P_K0, P_K1, x, y, z, cos(a) * s * sp, abs(u) * sp + 3f, sin(a) * s * sp,
+            rr(0.6f, 1.6f), 0.18f, 0.05f, 0.4f, 16f, gy + 0.03f, 0.5f)
     }
     // metal shards
-    for (n in 0 until 8) {
-        val u = rr(-1f, 1f); val a = rr(0f, twoPi); val s = sqrt(1f - u * u); val sp = rr(6f, 13f)
-        spawnDebris(st, x, y, z, cos(a) * s * sp, abs(u) * sp + 3f, sin(a) * s * sp, rr(2.2f, 3.2f), gy)
+    for (n in 0 until 10) {
+        val u = rr(-1f, 1f); val a = rr(0f, twoPi); val s = sqrt(1f - u * u); val sp = rr(8f, 17f)
+        spawnDebris(st, x, y, z, cos(a) * s * sp, abs(u) * sp + 4f, sin(a) * s * sp, rr(2.4f, 3.4f), gy)
     }
     spawnScorch(st, x, gy, z)
 }
@@ -421,12 +451,12 @@ private fun boomGrenade(st: ThrowState, x: Float, y0: Float, z: Float, gy: Float
 private fun boomGas(st: ThrowState, cloud: Int, x: Float, y0: Float, z: Float, gy: Float) {
     val y = max(y0, gy + 0.2f)
     val twoPi = 2f * PI.toFloat()
-    spawnFlash(st, x, y + 0.1f, z, 1.8f)
+    spawnFlash(st, x, y + 0.1f, z, 2.2f)
     // fast white vapour jet
-    for (n in 0 until 24) {
-        val u = rr(-1f, 1f); val a = rr(0f, twoPi); val s = sqrt(1f - u * u); val sp = rr(4f, 9f)
+    for (n in 0 until 30) {
+        val u = rr(-1f, 1f); val a = rr(0f, twoPi); val s = sqrt(1f - u * u); val sp = rr(4f, 11f)
         spawnP(st, P_V0, P_V1, x, y, z, cos(a) * s * sp, abs(u) * sp * 0.6f + 0.5f, sin(a) * s * sp,
-            rr(0.5f, 0.9f), 0.3f, rr(1.2f, 2f), 3f, 0f, gy + 0.05f, 0.2f)
+            rr(0.5f, 1.0f), 0.4f, rr(1.6f, 2.8f), 3f, 0f, gy + 0.05f, 0.2f)
     }
     // lid, valve wheel and a few bits fly off
     for (n in 0 until 6) {
@@ -437,17 +467,36 @@ private fun boomGas(st: ThrowState, cloud: Int, x: Float, y0: Float, z: Float, g
     st.gasX[cloud] = x
     st.gasY[cloud] = gy
     st.gasZ[cloud] = z
+    st.gasR[cloud] = GAS_RADIUS * 0.35f
 }
 
-private fun spawnGasPuff(st: ThrowState, cloud: Int, early: Boolean) {
+/**
+ * One puff of gas. Three kinds, so the cloud has depth and does not look like one pile of balls:
+ *  haze (30%): very flat, flies far and fast, hugs the ground
+ *  body (50%): squashed, rolls and swirls around waist height
+ *  core (20%): bigger and slower, the dense heart of the cloud, a bit higher
+ */
+private fun spawnGasPuff(st: ThrowState, cloud: Int) {
     val a = rr(0f, 2f * PI.toFloat())
-    val hs = rr(0.6f, if (early) 6f else 3.2f)
     val from = P_G0 + cloud * GAS_PUFFS
     val gy = st.gasY[cloud]
-    spawnP(st, from, from + GAS_PUFFS,
-        st.gasX[cloud] + rr(-0.1f, 0.1f), gy + 0.25f + rr(0f, 0.15f), st.gasZ[cloud] + rr(-0.1f, 0.1f),
-        cos(a) * hs, rr(-0.2f, 2.4f), sin(a) * hs,
-        rr(6.5f, 8f), rr(0.5f, 0.9f), rr(2.6f, 4.4f), 1.5f, -0.02f, gy + 0.25f, 0.55f, 1.4f)
+    val kind = Random.nextFloat()
+    val life = rr(GAS_SEC - 1.5f, GAS_SEC - 0.2f)
+    val px = st.gasX[cloud] + rr(-0.15f, 0.15f)
+    val pz = st.gasZ[cloud] + rr(-0.15f, 0.15f)
+    if (kind < 0.30f) {          // haze
+        val hs = rr(4.5f, 10.2f)
+        spawnP(st, from, from + GAS_PUFFS, px, gy + 0.3f, pz, cos(a) * hs, rr(0f, 0.6f), sin(a) * hs,
+            life, 1.2f, rr(5.5f, 9f), 1.2f, 0f, gy + 0.15f, 0.82f, 1.6f, rr(0.22f, 0.32f), rr(0.25f, 0.6f))
+    } else if (kind < 0.80f) {   // body
+        val hs = rr(1.8f, 8.2f)
+        spawnP(st, from, from + GAS_PUFFS, px, gy + 0.4f, pz, cos(a) * hs, rr(0.2f, 2.0f), sin(a) * hs,
+            life, 1.0f, rr(4.2f, 7.2f), 1.2f, 0f, gy + 0.2f, 0.80f, 2.2f, rr(0.5f, 0.7f), rr(0.6f, 1.9f))
+    } else {                     // core
+        val hs = rr(0.4f, 3.6f)
+        spawnP(st, from, from + GAS_PUFFS, px, gy + 0.5f, pz, cos(a) * hs, rr(0.5f, 2.4f), sin(a) * hs,
+            life, 1.2f, rr(3.6f, 5.6f), 1.4f, 0f, gy + 0.2f, 0.78f, 1.8f, rr(0.7f, 0.9f), rr(1.2f, 2.5f))
+    }
 }
 
 // ---------------------------------------------------------------------
@@ -670,19 +719,25 @@ internal fun updateThrowables(dt: Float, rig: GameInput, nodes: ThrowNodes, dirX
         node.isVisible = true
     }
 
-    // ---- gas clouds: keep spraying for a moment, then hurt everyone inside ----
+    // ---- gas clouds: keep spraying for a moment, then hurt everyone inside (more in the middle) ----
     for (g in 0 until GAS_MAX) {
         if (st.gasT[g] <= 0f) continue
         st.gasT[g] -= dt
         val t = GAS_SEC - max(0f, st.gasT[g])
+        st.gasR[g] = GAS_RADIUS * (0.35f + 0.65f * smooth01(t / GAS_GROW_SEC))
         if (t < GAS_EMIT_SEC) {
-            st.gasAcc[g] += (if (t < 0.3f) 60f else 20f) * dt
+            st.gasAcc[g] += (if (t < 0.4f) 90f else 32f) * dt
             while (st.gasAcc[g] >= 1f) {
                 st.gasAcc[g] -= 1f
-                spawnGasPuff(st, g, t < 0.4f)
+                spawnGasPuff(st, g)
             }
         }
-        mt?.gasHurt(st.gasX[g], st.gasZ[g], GAS_RADIUS, GAS_DPS, dt)
+        val fade = min(1f, max(0f, st.gasT[g]) / GAS_FADE_SEC)
+        val r = st.gasR[g]
+        // three shells added together: edge ~1 HP/s, middle ~2.1, core ~3.5 HP/s
+        mt?.gasHurt(st.gasX[g], st.gasZ[g], r, GAS_DPS_EDGE * fade, dt)
+        mt?.gasHurt(st.gasX[g], st.gasZ[g], r * 0.62f, GAS_DPS_MID * fade, dt)
+        mt?.gasHurt(st.gasX[g], st.gasZ[g], r * 0.30f, GAS_DPS_CORE * fade, dt)
     }
 
     updateFlashes(st, nodes, dt)
@@ -701,8 +756,8 @@ private fun updateFlashes(st: ThrowState, nodes: ThrowNodes, dt: Float) {
         if (st.flashT[f] <= 0f) { if (n.isVisible) n.isVisible = false; continue }
         st.flashT[f] -= dt
         if (st.flashT[f] <= 0f) { n.isVisible = false; continue }
-        val u = 1f - st.flashT[f] / 0.28f
-        val s = max(0.01f, (0.6f + st.flashBig[f] * u) * (1f - 0.9f * u * u))
+        val u = 1f - st.flashT[f] / 0.30f
+        val s = max(0.01f, (0.8f + st.flashBig[f] * u) * (1f - 0.9f * u * u))
         n.position = Position(st.flashX[f], st.flashY[f], st.flashZ[f])
         n.scale = Float3(s, s, s)
         n.isVisible = true
@@ -718,16 +773,33 @@ private fun updateParticles(st: ThrowState, nodes: ThrowNodes, dt: Float) {
         if (st.pLife[i] <= 0f) { n.isVisible = false; continue }
         val age = st.pMax[i] - st.pLife[i]
         val u = age / st.pMax[i]
+        val isGas = i >= P_G0
 
         val k = exp(-st.pDrag[i] * dt)
-        st.pVX[i] *= k; st.pVY[i] *= k; st.pVZ[i] *= k
+        // gas: after the first burst, slow down more so it settles and just rolls about
+        val kk = if (isGas && age > 2.5f) exp(-2.6f * dt) else k
+        st.pVX[i] *= kk; st.pVY[i] *= kk; st.pVZ[i] *= kk
         st.pVY[i] -= st.pGrav[i] * dt
         val turb = st.pTurb[i]
         if (turb > 0f) {
             val ph = st.pPh[i]
-            st.pVX[i] += sin(tt * 1.7f + ph + st.pZ[i] * 0.8f) * turb * dt
-            st.pVZ[i] += cos(tt * 1.3f + ph * 1.3f + st.pX[i] * 0.8f) * turb * dt
-            st.pVY[i] += sin(tt * 1.1f + ph * 0.7f) * turb * 0.3f * dt
+            st.pVX[i] += sin(tt * 0.9f + ph + st.pZ[i] * 0.45f) * turb * dt
+            st.pVZ[i] += cos(tt * 0.7f + ph * 1.3f + st.pX[i] * 0.45f) * turb * dt
+            st.pVY[i] += sin(tt * 0.8f + ph * 0.7f) * turb * 0.25f * dt
+        }
+        if (isGas) {
+            val g = (i - P_G0) / GAS_PUFFS
+            val h = st.pY[i] - st.pFloor[i]
+            st.pVY[i] += (st.pTy[i] + sin(tt * 0.6f + st.pPh[i]) * 0.3f - h) * 1.6f * dt   // float at its own height
+            // soft wall: stay inside the cloud radius
+            val ddx = st.pX[i] - st.gasX[g]
+            val ddz = st.pZ[i] - st.gasZ[g]
+            val d = hypot(ddx, ddz)
+            val lim = st.gasR[g] * 0.97f
+            if (d > lim && d > 0.001f) {
+                st.pVX[i] -= ddx / d * 7f * dt
+                st.pVZ[i] -= ddz / d * 7f * dt
+            }
         }
         st.pX[i] += st.pVX[i] * dt
         st.pY[i] += st.pVY[i] * dt
@@ -738,19 +810,24 @@ private fun updateParticles(st: ThrowState, nodes: ThrowNodes, dt: Float) {
             st.pVX[i] *= 0.96f
             st.pVZ[i] *= 0.96f
         }
-        if (i >= P_G0 && st.pY[i] > st.pFloor[i] + 2.2f) {       // the gas stays low
-            st.pY[i] = st.pFloor[i] + 2.2f
+        if (isGas && st.pY[i] > st.pFloor[i] + 3.2f) {       // the gas stays low
+            st.pY[i] = st.pFloor[i] + 3.2f
             if (st.pVY[i] > 0f) st.pVY[i] = 0f
         }
 
-        val e = 1f - (1f - u) * (1f - u)
-        val size = st.pS0[i] + (st.pS1[i] - st.pS0[i]) * e
+        // size: the gas spreads out fast in the first 3 seconds, everything else grows over its life
+        val e = if (isGas) {
+            val a = min(1f, age / 3f)
+            1f - (1f - a) * (1f - a) * (1f - a)
+        } else 1f - (1f - u) * (1f - u)
+        var size = st.pS0[i] + (st.pS1[i] - st.pS0[i]) * e
+        if (isGas) size *= 1f + 0.06f * sin(tt * 1.1f + st.pPh[i])    // slow billowing
         val hold = st.pHold[i]
         var fade = if (u < hold) 1f else 1f - (u - hold) / (1f - hold)
-        fade *= min(1f, age / 0.25f)                      // grows in, thins out at the end
+        fade *= min(1f, age / (if (isGas) 0.6f else 0.25f))         // grows in, thins out at the end
         val s = max(0.001f, size * fade)
         n.position = Position(st.pX[i], st.pY[i], st.pZ[i])
-        n.scale = Float3(s, s, s)
+        n.scale = Float3(s, s * st.pSq[i], s)
         n.isVisible = true
     }
 }
@@ -792,7 +869,7 @@ private fun updateScorch(st: ThrowState, nodes: ThrowNodes, dt: Float) {
         if (st.sLife[i] <= 0f) { n.isVisible = false; continue }
         val grow = min(1f, (SCORCH_SEC - st.sLife[i]) / 0.15f)
         val fade = min(1f, st.sLife[i] / 3f)
-        val r = 1.9f * grow * fade
+        val r = 3.6f * grow * fade
         n.position = Position(st.sX[i], st.sY[i], st.sZ[i])
         n.scale = Float3(max(0.01f, r), 0.01f, max(0.01f, r))
         n.isVisible = true
