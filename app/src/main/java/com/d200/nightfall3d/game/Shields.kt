@@ -71,7 +71,8 @@ internal val SHIELDS = listOf(
         description = "Ad shield. Magical spinning smoke. Enemies that come close lose HP. Slower to grow back.",
         hard = false, unlockLevel = 0, priceCoins = 0, ad = true,
         maxHits = 35f, reviveSec = 30f, auraDps = 12f, auraR = 2.4f,
-        accent = 0xFFB04CFFL
+        accent = 0xFFB04CFFL,
+        floorAnchored = true, modelScale = 0.95f
     ),
     ShieldDef(
         id = "prism", name = "Prism Barrier", style = ShieldStyle.TRIANGLE,
@@ -79,7 +80,8 @@ internal val SHIELDS = listOf(
         description = "Hard shield. Blue triangle plates, the strongest shield. A shock field hurts enemies that come close.",
         hard = true, unlockLevel = 0, priceCoins = 50000, ad = false,
         maxHits = 60f, reviveSec = 25f, auraDps = 6f, auraR = 2.0f,
-        accent = 0xFF2A8CFFL
+        accent = 0xFF2A8CFFL,
+        floorAnchored = true, modelScale = 0.95f
     ),
     ShieldDef(
         id = "tech", name = "Tech Dome", style = ShieldStyle.TECH,
@@ -87,7 +89,8 @@ internal val SHIELDS = listOf(
         description = "Tech dome with a hex sphere pattern.",
         hard = false, unlockLevel = 50, priceCoins = 0, ad = false,
         maxHits = 30f, reviveSec = 18f, auraDps = 0f, auraR = 0f,
-        accent = 0xFF19D2E4L
+        accent = 0xFF19D2E4L,
+        floorAnchored = true, modelScale = 0.95f
     ),
     ShieldDef(
         id = "spark", name = "Storm Spark", style = ShieldStyle.SPARK,
