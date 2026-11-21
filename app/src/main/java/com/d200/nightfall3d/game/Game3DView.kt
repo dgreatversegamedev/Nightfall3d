@@ -61,8 +61,18 @@ import kotlin.random.Random
 // Shield files (see Shields.kt): nightfall_shield_blue_hex.glb, nightfall_shield_pink.glb,
 //   nightfall_shield_geo_triangles.glb, nightfall_shield_hex_sphere.glb, shield_storm_spark.glb
 //
-// CHANGES IN THIS VERSION
-//  KING OF THE HILL: the orange zone ring is drawn here (createHillNodes / updateHill come from KingOfHill.kt).
+// CHANGES IN THIS VERSION (ORANGE GUN FIT)
+//  1) ORANGE GUNS USE THE GUN FIT LAB 2 MEASUREMENT. MP5, Carbine and Rifle have their measured fit
+//     (same hand bone 40 = R_Hand, same turn, same position, own scale and grip). Checked on all 6 Orange clips:
+//     the barrel points straight forward and level in every clip, and the left hand stays on the same spot of the gun.
+//  2) ORANGE NOW USES ITS OWN 6 CLIPS: idle, walk, run, shoot, walk_shoot, run_shoot. The old trick that played the
+//     walk clip for idle (and froze it on a frame) is gone, so he stands in a real idle and shoots in a real shoot pose.
+//     Clips Orange does not have yet (punch, jump, crouch) keep playing his current idle / walk / run.
+//  3) ONE TURN FOR EVERY ANIMATION: the lab fit is the same in carry, shoot, walk_shoot and run_shoot, because
+//     Orange's hands hold the gun in the same place in all of them.
+//  4) AK-47 and AR use the CARBINE fit for Orange (same scale, grip, position and turn). If one looks too big
+//     or too small in his hands, only its scale in ORANGE_FITS needs changing.
+// (older) KING OF THE HILL: the orange zone ring is drawn here (createHillNodes / updateHill come from KingOfHill.kt).
 //     4 small additions: GameInput.hillNodes, the hillNodes list, addAll(hillNodes) and updateHill(...) in stepGame.
 // (older: GLB FIRE)
 //  A) BULLETS AND MUZZLE FIRE ARE NOW GLB FILES (put them in app/src/main/assets/). The names come from WeaponSpecs.kt:
@@ -262,52 +272,70 @@ private val CHAR_HAND_JOINT = intArrayOf(14, 14, 14, 40)
 private fun handJoint(ci: Int): Int = CHAR_HAND_JOINT.getOrElse(ci) { RIGHT_HAND_JOINT }
 private val ORANGE = CHAR_FILES.indexOf("orange_amor.glb")
 
-// Gun fit for Orange, made in the Gun Fit Lab (hand bone 40). Add the next guns here the same way.
-private val ORANGE_MP5 = GunDef(
-    name = "MP5",
-    file = "mp5_gun.glb",
-    pos = Position(-0.118f, -0.043f, -0.046f),
-    scale = 0.29f,
-    grip = Position(-0.519f, 0.035f, 0.142f),
-    carry = GunTurn(-20.5f, 21.5f, -180f),
+// ---------------------------------------------------------------------
+// ORANGE GUN FITS  -  measured in the Gun Fit Lab 2 (hand bone 40 = R_Hand).
+//
+// How it was checked (all 6 Orange clips, 41 frames each):
+//  * The gun barrel points straight forward (0 degrees sideways, 0 degrees up/down) and the gun stays upright
+//    in idle, walk, run, shoot, walk_shoot and run_shoot.
+//  * The left hand stays on the same spot in the right hand's space (it moves less than 0.01 in any clip),
+//    so the gun is held by both hands in every clip with ONE fixed fit.
+// Because of that, every Orange gun uses ONE turn and ONE position for carry, shoot, walk_shoot and run_shoot.
+// Only the scale and the grip (where on the gun the hand holds it) are different for each gun.
+//
+// To add or change a gun: tune it in the lab, then copy the scale and grip numbers into ORANGE_FITS below.
+// ---------------------------------------------------------------------
+private val ORANGE_POS = Position(0.005f, 0.019f, 0f)
+private val ORANGE_TURN = GunTurn(-83.5f, 3.2f, 79.7f)
+
+private fun orangeFit(name: String, file: String, scale: Float, grip: Position, hasScope: Boolean = false) = GunDef(
+    name = name,
+    file = file,
+    pos = ORANGE_POS,
+    scale = scale,
+    grip = grip,
+    carry = ORANGE_TURN,
     aim = mapOf(
-        "shoot" to GunTurn(-22f, 16f, -180f),
-        "walk_shoot" to GunTurn(-61.5f, -27f, -173f),
-        "run_shoot" to GunTurn(-65.5f, -31f, 180f)
-    )
+        "shoot" to ORANGE_TURN,
+        "walk_shoot" to ORANGE_TURN,
+        "run_shoot" to ORANGE_TURN
+    ),
+    hasScope = hasScope
 )
-private val ORANGE_FITS: Map<String, GunDef> = mapOf("MP5" to ORANGE_MP5)
+
+// The Carbine fit. AK-47 and AR use the exact same scale, grip, position and turn (your decision).
+private const val CARBINE_SCALE = 0.42f
+private val CARBINE_GRIP = Position(0f, 0.08f, 0.19f)
+
+private val ORANGE_FITS: Map<String, GunDef> = mapOf(
+    "MP5" to orangeFit("MP5", "mp5_gun.glb", 0.29f, Position(0f, 0.09f, 0.15f)),
+    "Carbine" to orangeFit("Carbine", "carbine.glb", CARBINE_SCALE, CARBINE_GRIP),
+    "Rifle" to orangeFit("Rifle", "rifle.glb", 0.5f, Position(0f, 0.07f, 0.12f), hasScope = true),
+    "AK-47" to orangeFit("AK-47", "ak47_gun.glb", CARBINE_SCALE, CARBINE_GRIP),
+    "AR" to orangeFit("AR", "ar_gun.glb", CARBINE_SCALE, CARBINE_GRIP)
+)
 
 // The gun definition to use for this character. Blue / Red / Aqua use the normal GUNS entry.
-// Orange uses its own fit. A gun without an Orange fit yet borrows the Orange MP5 position + rotations
-// and keeps its own scale and grip (not tuned: fit that gun in the lab and add it to ORANGE_FITS).
+// Orange uses ORANGE_FITS. A gun added later without an entry there borrows the Orange position and turn
+// and keeps its own scale and grip, so it is only a rough fit until it is added to ORANGE_FITS.
 private fun fitFor(def: GunDef, ci: Int): GunDef {
     if (ci != ORANGE) return def
     ORANGE_FITS[def.name]?.let { return it }
-    return GunDef(
-        name = def.name, file = def.file, pos = ORANGE_MP5.pos, scale = def.scale, grip = def.grip,
-        carry = ORANGE_MP5.carry, aim = ORANGE_MP5.aim, hasScope = def.hasScope
-    )
+    return orangeFit(def.name, def.file, def.scale, def.grip, def.hasScope)
 }
 
-// Orange only has the clips run / shoot / walk. The other names the game asks for are borrowed from them.
-// (idle, jump, crouch and punches are placeholders until Orange gets its own animations.)
-private fun clipAlias(ci: Int, want: String): String {
+// Orange now has the clips idle / walk / run / shoot / walk_shoot / run_shoot, the same names the game asks for,
+// so they play as they are. The names Orange does not have yet (punch, jump, crouch) keep playing the current
+// idle / walk / run until he gets his own animations.
+private val ORANGE_CLIPS = setOf("idle", "walk", "run", "shoot", "walk_shoot", "run_shoot")
+private fun clipAlias(ci: Int, want: String, base: String): String {
     if (ci != ORANGE) return want
-    return when (want) {
-        "run", "run_shoot" -> "run"
-        "shoot" -> "shoot"
-        else -> "walk"
-    }
+    return if (want in ORANGE_CLIPS) want else base
 }
-// idle = the walk clip held on the frame used for the gun fit; shoot = the shoot clip held on its first frame.
-private fun clipForce(ci: Int, want: String, forceTime: Float): Float {
+// Orange clips always play on their own time (no frozen frames).
+private fun clipForce(ci: Int, forceTime: Float): Float {
     if (ci != ORANGE) return forceTime
-    return when (want) {
-        "idle" -> 0.45f
-        "shoot" -> 0f
-        else -> forceTime
-    }
+    return -1f
 }
 
 // Plain values the game loop changes every frame (no Compose redraw needed)
@@ -996,7 +1024,7 @@ private fun stepGame(
         if (on) {
             m.position = Position(rig.x, rig.y + rig.jumpH, rig.z)
             m.rotation = Rotation(y = rig.faceDeg)
-            driveAnimation(m, rig.anim[i], clipAlias(i, want), dt, timeScale, clipForce(i, want, forceTime), layerBase)
+            driveAnimation(m, rig.anim[i], clipAlias(i, want, base), dt, timeScale, clipForce(i, forceTime), layerBase)
         }
     }
 
