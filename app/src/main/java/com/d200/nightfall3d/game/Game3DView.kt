@@ -61,7 +61,16 @@ import kotlin.random.Random
 // Shield files (see Shields.kt): nightfall_shield_blue_hex.glb, nightfall_shield_pink.glb,
 //   nightfall_shield_geo_triangles.glb, nightfall_shield_hex_sphere.glb, shield_storm_spark.glb
 //
-// CHANGES IN THIS VERSION (NEW GRENADE + GAS CAN)
+// CHANGES IN THIS VERSION (BLUE HOLDS GUNS WITH THE ORANGE MEASUREMENT)
+//  1) The new char_blue.glb has ALL of Orange's clips retargeted onto Blue's skeleton (idle, walk, run, shoot,
+//     walk_shoot, run_shoot, punch_1/2/3, jump_inplace, plus stand, walk_down, run_down, kick, kick_round,
+//     kick_spin, crouch). Blue's old clips are still inside with the suffix _orig.
+//  2) Blue / Red / Aqua (Mixamo hand bone 14) now hold every gun with the ORANGE fit (blueFit below):
+//     the Orange position + turn converted into Blue's hand-bone space, and Orange's scale + grip.
+//     One fit for carry, shoot, walk_shoot and run_shoot, exactly like Orange.
+//  3) The bots (they are Blue) use the same fit (stepBots now calls fitFor).
+//
+// (older) NEW GRENADE + GAS CAN
 //  The grenade, gas can, explosion and gas cloud models are now made in Throwables.kt (createThrowNodes).
 //  This file only calls it: see "val throwNodes = remember { createThrowNodes(...) }". Nothing else changed.
 //
@@ -319,11 +328,41 @@ private val ORANGE_FITS: Map<String, GunDef> = mapOf(
     "AR" to orangeFit("AR", "ar_gun.glb", CARBINE_SCALE, CARBINE_GRIP)
 )
 
-// The gun definition to use for this character. Blue / Red / Aqua use the normal GUNS entry.
-// Orange uses ORANGE_FITS. A gun added later without an entry there borrows the Orange position and turn
-// and keeps its own scale and grip, so it is only a rough fit until it is added to ORANGE_FITS.
+// ---------------------------------------------------------------------
+// BLUE / RED / AQUA GUN FIT  -  the ORANGE measurement turned into the Mixamo hand bone (bone 14).
+//
+// The new char_blue.glb plays Orange's clips retargeted onto Blue's skeleton, so Blue's right hand is in the same
+// place in the world as Orange's in every clip. The only thing that differs is the two hand bones' own rest turn,
+// so the Orange turn and position were multiplied by (Blue hand rest turn)^-1 * (Orange hand rest turn).
+// Result: ONE position + ONE turn for carry, shoot, walk_shoot and run_shoot (like Orange). Scale and grip are Orange's.
+// If a gun looks a little off in Blue's hand, nudge only BLUE_POS / BLUE_TURN (all guns move together).
+// ---------------------------------------------------------------------
+private val BLUE_POS = Position(-0.0046f, 0.0168f, -0.0091f)
+private val BLUE_TURN = GunTurn(-106.49f, -7.09f, 170.67f)
+
+private fun blueFit(def: GunDef): GunDef {
+    val o = ORANGE_FITS[def.name] ?: orangeFit(def.name, def.file, def.scale, def.grip, def.hasScope)
+    return GunDef(
+        name = def.name,
+        file = def.file,
+        pos = BLUE_POS,
+        scale = o.scale,
+        grip = o.grip,
+        carry = BLUE_TURN,
+        aim = mapOf(
+            "shoot" to BLUE_TURN,
+            "walk_shoot" to BLUE_TURN,
+            "run_shoot" to BLUE_TURN
+        ),
+        hasScope = o.hasScope
+    )
+}
+
+// The gun definition to use for this character. Orange uses ORANGE_FITS. Blue / Red / Aqua use blueFit
+// (the Orange fit converted into the Mixamo hand). A gun added later without an Orange entry borrows the
+// Orange position and turn and keeps its own scale and grip, so it is only a rough fit until it is added to ORANGE_FITS.
 private fun fitFor(def: GunDef, ci: Int): GunDef {
-    if (ci != ORANGE) return def
+    if (ci != ORANGE) return blueFit(def)
     ORANGE_FITS[def.name]?.let { return it }
     return orangeFit(def.name, def.file, def.scale, def.grip, def.hasScope)
 }
@@ -1193,7 +1232,7 @@ private fun stepBots(
         if (i >= mt.bots.size) break
         val b = mt.bots[i]
         val v = views[i]
-        val gdef = GUNS[v.gunIdx.coerceIn(0, GUNS.lastIndex)]
+        val gdef = fitFor(GUNS[v.gunIdx.coerceIn(0, GUNS.lastIndex)], 0)   // bots are Blue: same Orange-based fit
         val vis = b.alive
         v.model.isVisible = vis
         v.marker.isVisible = vis
