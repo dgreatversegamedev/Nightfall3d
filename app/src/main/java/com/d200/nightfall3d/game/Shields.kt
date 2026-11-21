@@ -13,6 +13,15 @@ package com.d200.nightfall3d.game
 // maxHits   = how many hits the shield takes before it breaks
 // reviveSec = seconds until it grows back
 // auraDps   = HP per second that enemies lose while they stand inside auraR (meters). 0 = no aura.
+//
+// SHIELD FIT (new)
+//  floorAnchored = false : old way. The whole GLB box is centered on his chest and sized by its biggest side.
+//                          This is wrong for any file that has a wide floor ring: the real shield comes out small and high.
+//  floorAnchored = true  : the GLB is used at its own size, with its floor (the file's origin) on the ground under him.
+//                          modelScale makes it bigger or smaller (1.0 = the size it was made in).
+//  Only shields that were measured from the file use floorAnchored = true.
+//  Classic Hex (nightfall_shield_blue_hex.glb): floor ring radius 2.21, dome radius 1.6, dome height 2.1, origin on the floor.
+//  modelScale 0.95 gives a dome 2.0 tall and 3.0 wide, so it covers him from his feet to above his head.
 // =====================================================================
 
 // Keep this order: it is the same order as STYLE_COLS in ShieldView.kt
@@ -32,7 +41,9 @@ internal class ShieldDef(
     val reviveSec: Float,
     val auraDps: Float,
     val auraR: Float,
-    val accent: Long
+    val accent: Long,
+    val floorAnchored: Boolean = false,   // true = use the GLB at its own size with its floor under his feet
+    val modelScale: Float = 1f            // only used when floorAnchored = true
 ) {
     fun availableAt(level: Int): Boolean = !ad && priceCoins == 0 && level >= unlockLevel
 
@@ -51,7 +62,8 @@ internal val SHIELDS = listOf(
         description = "Standard energy shield. Blocks all damage until it breaks.",
         hard = false, unlockLevel = 0, priceCoins = 0, ad = false,
         maxHits = 25f, reviveSec = 20f, auraDps = 0f, auraR = 0f,
-        accent = 0xFF35C8FFL
+        accent = 0xFF35C8FFL,
+        floorAnchored = true, modelScale = 0.95f
     ),
     ShieldDef(
         id = "vortex", name = "Vortex", style = ShieldStyle.VORTEX,
