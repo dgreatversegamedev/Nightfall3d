@@ -57,17 +57,21 @@ import kotlin.math.roundToInt
 //   walk stick -> move | fire ring -> aim + shoot (gun mode) / big fist button -> punch (hand mode)
 //   jump | Switch (gun mode <-> hand mode) | weapon list -> which gun is in the hand
 //
-// CHANGES IN THIS VERSION
+// CHANGES IN THIS VERSION (THROW AIM)
+//  1) GRENADE and GAS buttons: press and hold, drag to aim, let go to throw (ThrowAimButton).
+//     A quick tap throws straight ahead. The dotted line and landing ring are drawn in the 3D view (Throwables.kt).
+//  2) "THROW 12 m" text shows at the bottom while you aim.
+//  3) The seconds until the next grenade / gas can is back show next to its button.
+//
+// EARLIER
 //  1) CAPTURE THE FLAG now starts a real match (before, only Deathmatch / Team Deathmatch did, so no flag showed).
 //     The match gets the capture limit and the Blue / Red bot numbers from the Match Setup screen.
 //  2) Scoreboard in Capture the Flag: captures for each team, "FIRST TO n" (or "NO LIMIT"), and a line that tells
 //     you what to do now and how far it is ("GET THE ENEMY FLAG  34 m").
 //  3) A banner "YOU HAVE THE FLAG" while you carry the enemy flag.
-//
-// EARLIER (Build 1)
-//  1) Top right icons are LIVE: blue icon = friends alive (you included), red skull = enemies alive.
-//  2) Scope button only works on a gun that has a scope (GunDef.hasScope).
-//  3) Orange accent on the scoreboard title.
+//  4) Top right icons are LIVE: blue icon = friends alive (you included), red skull = enemies alive.
+//  5) Scope button only works on a gun that has a scope (GunDef.hasScope).
+//  6) Orange accent on the scoreboard title.
 //
 // One size system: BIG 112 | MID 88 | SMALL 80 | TOP 58 | sticks 220 (walk) and 200 (fire ring)
 // One colour system: dark navy glass, steel ring when idle, Nightfall orange when active.
@@ -263,6 +267,69 @@ private fun CountBadge(k: Float, modifier: Modifier, text: String) {
             .border((1.5f * k).dp, RingIdle, RoundedCornerShape((6 * k).dp)),
         contentAlignment = Alignment.Center
     ) { NfText(text, size = fsz(k, 22f), bold = true, align = TextAlign.Center) }
+}
+
+/** Hold and drag to aim, let go to throw. The guide is drawn in the 3D view (Throwables.kt). */
+@Composable
+private fun ThrowAimButton(
+    k: Float,
+    modifier: Modifier,
+    d: Float,
+    kind: Int,
+    ring: Color,
+    input: GameInput,
+    content: @Composable BoxScope.() -> Unit
+) {
+    Box(
+        modifier
+            .sized(k, d, d)
+            .clip(CircleShape)
+            .background(GlassSoft)
+            .border((2 * k).dp, ring, CircleShape)
+            .pointerInput(kind) {
+                awaitEachGesture {
+                    val down = awaitFirstDown(requireUnconsumed = false)
+                    down.consume()
+                    val th = input.thr
+                    val have = if (kind == 0) input.grenades else input.gasCans
+                    if (have <= 0) {
+                        while (true) {
+                            val e = awaitPointerEvent()
+                            if (e.changes.none { it.pressed }) break
+                            e.changes.forEach { it.consume() }
+                        }
+                        return@awaitEachGesture
+                    }
+                    val c = Offset(size.width / 2f, size.height / 2f)
+                    val maxR = (360f * k).dp.toPx()
+                    val dead = (30f * k).dp.toPx()
+                    th.aimKind = kind
+                    th.power = -1f
+                    th.aimX = 0f
+                    th.aimY = 0f
+                    th.aimOn = true
+                    while (true) {
+                        val event = awaitPointerEvent()
+                        val ch = event.changes.firstOrNull { it.id == down.id } ?: break
+                        if (!ch.pressed) break
+                        val v = ch.position - c
+                        val dist = v.getDistance()
+                        if (dist > dead) {
+                            th.aimX = v.x / dist
+                            th.aimY = v.y / dist
+                            th.power = (dist / maxR).coerceIn(0.08f, 1f)
+                        } else {
+                            th.power = -1f
+                        }
+                        ch.consume()
+                    }
+                    th.aimOn = false
+                    input.throwReq = kind + 1
+                }
+            },
+        contentAlignment = Alignment.Center,
+        content = content
+    )
 }
 
 /**
@@ -592,27 +659,26 @@ fun HudScreen(api: GameApi, onExit: () -> Unit) {
             GlyphButton(k, atBL(k, 26f, 418f, MID), MID, Glyph.BACKPACK, 0.58f, Orange, 3f)
             GlyphButton(k, atBL(k, 26f, 530f, MID), MID, Glyph.MEDKIT, 0.58f)
             CountBadge(k, atBL(k, 84f, 576f, 28f), "5")
-            // grenade: taken on the Weapons screen > GRENADES
+
+            // grenade: hold and drag to aim, let go to throw
             if (ThrowLoadout.grenadeOn) {
-                GlyphButton(k, atBL(k, 26f, 642f, MID), MID, Glyph.GRENADE, 0.58f) {
-                    if (input.grenades > 0) input.throwReq = 1
+                ThrowAimButton(k, atBL(k, 26f, 642f, MID), MID, 0, RingIdle, input) {
+                    GlyphIcon(Glyph.GRENADE, Modifier.size((MID * 0.58f * k).dp), main = Color.White, cut = CutColor)
                 }
                 CountBadge(k, atBL(k, 84f, 688f, 28f), "${input.grenades}")
+                if (input.thr.gSec > 0) {
+                    NfText("${input.thr.gSec}s", size = fsz(k, 20f), bold = true, color = Orange, modifier = atBL(k, 118f, 700f, 30f))
+                }
             }
-            // gas can (above the backpack; change 306f / 352f to move it)
+            // gas can (above the backpack)
             if (ThrowLoadout.gasOn) {
-                Box(
-                    atBL(k, 26f, 306f, MID)
-                        .sized(k, MID, MID)
-                        .clip(CircleShape)
-                        .background(GlassSoft)
-                        .border((2 * k).dp, Color(0xFF8BE03A), CircleShape)
-                        .clickable { if (input.gasCans > 0) input.throwReq = 2 },
-                    contentAlignment = Alignment.Center
-                ) {
+                ThrowAimButton(k, atBL(k, 26f, 306f, MID), MID, 1, Color(0xFF8BE03A), input) {
                     NfText("GAS", size = fsz(k, 26f), bold = true, color = Color(0xFF8BE03A))
                 }
                 CountBadge(k, atBL(k, 84f, 352f, 28f), "${input.gasCans}")
+                if (input.thr.cSec > 0) {
+                    NfText("${input.thr.cSec}s", size = fsz(k, 20f), bold = true, color = Orange, modifier = atBL(k, 118f, 364f, 30f))
+                }
             }
 
             // walk stick -> the character moves
@@ -703,6 +769,17 @@ fun HudScreen(api: GameApi, onExit: () -> Unit) {
                     size = fsz(k, 26f),
                     bold = true,
                     color = Color(0xFFFFB070),
+                    modifier = Modifier.align(Alignment.BottomCenter).padding(bottom = (130 * k).dp)
+                )
+            }
+
+            // "THROW 12 m" while a finger holds the grenade / gas button
+            if (input.thr.aimOn) {
+                NfText(
+                    "THROW ${input.thr.aimDistInt} m",
+                    size = fsz(k, 26f),
+                    bold = true,
+                    color = Orange,
                     modifier = Modifier.align(Alignment.BottomCenter).padding(bottom = (130 * k).dp)
                 )
             }
